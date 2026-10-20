@@ -96,6 +96,18 @@ def test_changed_shared_setup_preserves_original_selection(baseline_project, cha
     assert "running the original test selection" in result.stdout.str() + result.stderr.str()
 
 
+@pytest.mark.parametrize(
+    ("filename", "original", "updated"),
+    [("README.md", "# Original\n", "# Updated\n"), ("fixture.json", '{"price": 1}\n', '{"price": 2}\n')],
+)
+def test_non_python_change_preserves_original_selection(baseline_project, change_file, filename, original, updated):
+    (baseline_project.path / filename).write_text(original)
+    change_file(filename, updated)
+    result = run_skippy(baseline_project)
+    result.assert_outcomes(passed=3)
+    assert "running the original test selection" in result.stdout.str() + result.stderr.str()
+
+
 def test_new_parameterizations_are_not_lost(baseline_project, change_file):
     source = (baseline_project.path / "test_other.py").read_text()
     change_file(

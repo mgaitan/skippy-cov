@@ -72,7 +72,10 @@ def test_import_declaration_and_addition_only_changes_require_original_selection
         selection_case(source)
 
 
-@pytest.mark.parametrize("filename", ["conftest.py", "__init__.py", "model.xml", "fixture.sql", "pyproject.toml"])
+@pytest.mark.parametrize(
+    "filename",
+    ["conftest.py", "__init__.py", "model.xml", "fixture.sql", "pyproject.toml", "README.md", "fixture.json"],
+)
 def test_non_python_and_shared_dependencies_require_original_selection(selection_case, filename):
     with pytest.raises(SelectionError, match="impact"):
         selection_case(filename=filename)

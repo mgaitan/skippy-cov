@@ -65,8 +65,6 @@ def select_tests_to_run(diff_handler: DiffHandler, coverage_map: CoverageMap) ->
         Path(context.rsplit("|", 1)[0].split("::", 1)[0]) for context in coverage_map.db.measured_contexts() if context
     }
     for file_path in sorted(diff_handler.changed_files):
-        if file_path.suffix == ".md":
-            continue
         patch = diff_handler.patches[file_path]
         if (
             file_path.suffix != ".py"
