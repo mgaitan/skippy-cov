@@ -91,9 +91,7 @@ def get_default_branch() -> str:
         str: The name of the default branch (e.g., "main", "develop").
     """
     try:
-        output = subprocess.check_output(
-            ["git", "remote", "show", "origin"], stderr=subprocess.DEVNULL, text=True
-        )
+        output = subprocess.check_output(["git", "remote", "show", "origin"], stderr=subprocess.DEVNULL, text=True)
         for line in output.splitlines():
             if "HEAD branch" in line:
                 return line.split(":")[-1].strip()
@@ -115,22 +113,16 @@ def get_diff_content(diff_arg: str | None = None) -> str:
     # Otherwise, treat as git diff argument (branch/refspec)
     diff_ref = diff_arg if diff_arg else f"{get_default_branch()}...HEAD"
     try:
-        diff = subprocess.check_output(
-            ["git", "diff", diff_ref], stderr=subprocess.DEVNULL, text=True
-        )
+        diff = subprocess.check_output(["git", "diff", diff_ref], stderr=subprocess.DEVNULL, text=True)
     except Exception as e:
-        print(
-            f"skippy-cov: failed to get git diff for '{diff_ref}': {e}", file=sys.stderr
-        )
+        print(f"skippy-cov: failed to get git diff for '{diff_ref}': {e}", file=sys.stderr)
         sys.exit(1)
     else:
         return diff
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(
-        description="Select pytest tests based on diff and coverage."
-    )
+    parser = argparse.ArgumentParser(description="Select pytest tests based on diff and coverage.")
     parser.add_argument(
         "--diff",
         required=False,
@@ -165,9 +157,7 @@ def main(argv=None):
         action="store_false",
         help="When using --relative-to, determine if the original path should be kept or removed",
     )
-    parser.add_argument(
-        "--debug", action="store_true", help="Enable debug logging.", default=False
-    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging.", default=False)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "--format",
@@ -182,9 +172,7 @@ def main(argv=None):
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
 
-    diff_content = (
-        get_diff_content(args.diff) if args.diff is not None else get_diff_content(None)
-    )
+    diff_content = get_diff_content(args.diff) if args.diff is not None else get_diff_content(None)
 
     run(
         diff_content,

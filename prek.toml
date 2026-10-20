@@ -1,0 +1,35 @@
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "check-json" },
+  { id = "check-merge-conflict" },
+  { id = "check-toml" },
+  { id = "check-yaml" },
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "ruff-check"
+name = "ruff check"
+language = "system"
+entry = "uv run --locked --group qa ruff check --fix"
+types_or = ["python", "pyi"]
+
+[[repos.hooks]]
+id = "ruff-format"
+name = "ruff format"
+language = "system"
+entry = "uv run --locked --group qa ruff format"
+types_or = ["python", "pyi"]
+
+[[repos.hooks]]
+id = "ty-check"
+name = "ty check"
+language = "system"
+entry = "uv run --locked --group qa ty check skippy_cov"
+pass_filenames = false
+always_run = true

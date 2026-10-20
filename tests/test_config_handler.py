@@ -1,5 +1,5 @@
+from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Callable, Generator
 
 import pytest
 from pytest_mock import MockFixture

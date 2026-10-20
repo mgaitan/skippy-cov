@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import logging
+from importlib.metadata import version
 from pathlib import Path
 
 from skippy_cov.diff_handler import DiffHandler
@@ -10,7 +11,7 @@ from skippy_cov.utils import CoverageMap, FileTestCandidate, is_test_file
 
 logger = logging.getLogger(__name__)
 
-__version__ = "0.2.2"
+__version__ = version("skippy-cov")
 
 
 def discover_tests_in_file(file_path: Path) -> FileTestCandidate | None:
@@ -30,25 +31,16 @@ def discover_tests_in_file(file_path: Path) -> FileTestCandidate | None:
     """
     logger.debug(f"Discovering tests in {file_path} using AST...")
     if not is_test_file(file_path):
-        logger.debug(
-            f"Skipping AST discovery: File path '{file_path}' "
-            "doesn't match test file pattern."
-        )
+        logger.debug(f"Skipping AST discovery: File path '{file_path}' doesn't match test file pattern.")
         return None
     if not file_path.exists() or not file_path.is_file():
-        logger.debug(
-            f"Skipping AST discovery: File path '{file_path}' "
-            "does not exist or is not a file."
-        )
+        logger.debug(f"Skipping AST discovery: File path '{file_path}' does not exist or is not a file.")
         return None
     try:
         tree = ast.parse(file_path.read_text(), filename=file_path.name)
 
     except Exception as e:
-        logger.warning(
-            f"Could not discover tests via AST in '{file_path}' "
-            f"due to unexpected error: {e}"
-        )
+        logger.warning(f"Could not discover tests via AST in '{file_path}' due to unexpected error: {e}")
         return None
 
     try:
@@ -57,10 +49,7 @@ def discover_tests_in_file(file_path: Path) -> FileTestCandidate | None:
         found_tests = finder.tests
 
         if found_tests:
-            logger.debug(
-                f"Found {len(found_tests)} test(s) in '{file_path}' "
-                f"via AST: {found_tests}"
-            )
+            logger.debug(f"Found {len(found_tests)} test(s) in '{file_path}' via AST: {found_tests}")
         else:
             logger.debug(f"No tests found matching in '{file_path}' via AST.")
 

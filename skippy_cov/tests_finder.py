@@ -24,9 +24,7 @@ class ASTTestsFinder(ast.NodeVisitor):
 
         # TODO: consider python_classes and python_functions parameters on config
         # SEE: https://docs.pytest.org/en/stable/example/pythoncollection.html#changing-naming-conventions
-        class_has_init_method = any(
-            hasattr(method, "name") and method.name == "__init__" for method in node.body
-        )
+        class_has_init_method = any(hasattr(method, "name") and method.name == "__init__" for method in node.body)
         if node.name.startswith("Test") and not class_has_init_method:
             original_class_name = self.current_class_name
             self.current_class_name = node.name
