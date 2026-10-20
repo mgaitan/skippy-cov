@@ -192,3 +192,14 @@ def test_scope_with_no_affected_module_does_not_report_success(baseline_project,
     change_file()
     result = run_skippy(baseline_project, "test_other.py")
     assert result.ret == 5
+
+
+def test_invalid_diff_keeps_original_selection(baseline_project):
+    result = baseline_project.runpytest_subprocess(
+        "--skippy-cov",
+        "--skippy-cov-diff=missing-ref",
+        "legacy.py",
+        "test_other.py",
+    )
+    result.assert_outcomes(passed=3)
+    assert "running the original test selection" in result.stdout.str() + result.stderr.str()

@@ -16,7 +16,12 @@ def pytest_addoption(parser):
     group.addoption("--skippy-cov-coverage-file", type=Path, default=Path(".coverage"))
     group.addoption("--skippy-cov-source-root", type=Path, help="Original checkout root for coverage paths")
     group.addoption("--skippy-cov-keep-prefix", dest="skippy_cov_keep_prefix", action="store_true", default=True)
-    group.addoption("--skippy-cov-strip-prefix", dest="skippy_cov_keep_prefix", action="store_false")
+    group.addoption(
+        "--skippy-cov-strip-prefix",
+        dest="skippy_cov_keep_prefix",
+        action="store_false",
+        help="Deprecated compatibility option; pytest scopes are preserved.",
+    )
 
 
 def scoped_targets(selected: set[str], original: list[str], working_directory: Path) -> list[str]:
@@ -39,6 +44,11 @@ def pytest_configure(config):
     """Narrow collection only when both coverage and the diff are trustworthy."""
     if not config.getoption("skippy_cov"):
         return
+    if not config.getoption("skippy_cov_keep_prefix"):
+        warnings.warn(
+            pytest.PytestWarning("skippy-cov: --skippy-cov-strip-prefix is deprecated; preserving pytest scopes"),
+            stacklevel=2,
+        )
     try:
         selected = run(
             get_diff_content(config.getoption("skippy_cov_diff")),

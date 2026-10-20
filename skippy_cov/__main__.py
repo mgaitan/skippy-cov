@@ -1,35 +1,22 @@
-from __future__ import annotations
-
 import argparse
 import json
 import logging
+import shlex
 import subprocess
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
-from skippy_cov import SelectionError, __version__, select_tests_to_run
+from skippy_cov import __version__, select_tests_to_run
 from skippy_cov.diff_handler import DiffHandler, DiffHandlerError
-from skippy_cov.utils import CoverageMap, CoverageMapError, filter_by_path
+from skippy_cov.utils import CoverageMap, filter_by_path, merge_candidates
 
 logger = logging.getLogger(__name__)
 
 
-class Format(Enum):
+class Format(StrEnum):
     pytest = "pytest"
     json = "json"
     lines = "lines"
-
-    @classmethod
-    def argtype(cls, s: str) -> Enum:
-        try:
-            return cls[s]
-        except KeyError as e:
-            raise argparse.ArgumentTypeError(  # noqa: TRY003
-                f"{s!r} is not a valid format"
-            ) from e
-
-    def __str__(self):
-        return self.value
 
 
 def run(
@@ -42,151 +29,98 @@ def run(
     *,
     source_root: Path | None = None,
 ) -> set[str]:
-    """
-    Run the test filter. If `display` = True will also print the output to stdout
-    """
+    """Select tests and optionally print deterministic CLI output."""
     diff_handler = DiffHandler(diff)
     coverage_map = CoverageMap(coverage_file, source_root=source_root)
     selected_tests = select_tests_to_run(diff_handler, coverage_map)
-    tests = sorted(selected_tests)
-    if not tests:
-        logger.info("No specific tests selected to run based on changes and coverage.")
-    if keep_prefix and relative_to and len(relative_to) > 1:
-        logger.warning(
-            "Trying to remove prefix with more than one path as filter is not allowed. "
-            "The keep_prefix flag will be set to True"
-        )
-        keep_prefix = True
-
     if relative_to:
         selected_tests = filter_by_path(selected_tests, relative_to, keep_prefix)
-
-    output = set()
-    for test in selected_tests:
-        output |= test.as_set()
-
+    selected_tests = merge_candidates(selected_tests)
+    output = {target for candidate in selected_tests for target in candidate.as_set()}
     if display:
         if fmt == Format.pytest:
-            print(" ".join(output))
+            print(shlex.join(sorted(output)))
         elif fmt == Format.lines:
-            print("\n".join(output))
+            print("\n".join(sorted(output)))
         elif fmt == Format.json:
-            obj = {}
-            for test in selected_tests:
-                obj[test.path.as_posix()] = list(test.tests)
-            print(json.dumps(obj))
-
+            print(json.dumps({candidate.path.as_posix(): sorted(candidate.tests) for candidate in selected_tests}))
     return output
 
 
 def get_default_branch() -> str:
-    """
-    Determine the default branch to diff against.
-
-    This function attempts to determine the default branch by inspecting the
-    output of `git remote show origin`. If it fails to determine the branch
-    (e.g., not in a git repository, or `origin` is not configured), it falls
-    back to "main".
-
-    Returns:
-        str: The name of the default branch (e.g., "main", "develop").
-    """
+    """Find the default ref locally without contacting a remote or parsing locale-dependent output."""
     try:
-        output = subprocess.check_output(["git", "remote", "show", "origin"], stderr=subprocess.DEVNULL, text=True)
-        for line in output.splitlines():
-            if "HEAD branch" in line:
-                return line.split(":")[-1].strip()
-    except Exception:
-        logger.info("Could not determine default branch, falling back to 'main'.")
+        return subprocess.check_output(
+            ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        for reference in (
+            "refs/heads/main",
+            "refs/heads/master",
+            "refs/remotes/origin/main",
+            "refs/remotes/origin/master",
+        ):
+            try:
+                subprocess.check_output(
+                    ["git", "show-ref", "--verify", reference],
+                    stderr=subprocess.DEVNULL,
+                )
+            except (OSError, subprocess.CalledProcessError):
+                continue
+            return reference.removeprefix("refs/heads/").removeprefix("refs/remotes/")
     return "main"
 
 
 def get_diff_content(diff_arg: str | None = None) -> str:
-    """
-    Get the diff content based on the provided argument.
-    It can either be a file path or a git ref/branch to diff against.
-    """
-    # If it's a file path and exists, read it as a file
-    if diff_arg:  # Only try Path if diff_arg is not None/empty
-        path = Path(diff_arg)
-        if path.exists():
-            return path.read_text()
-    # Otherwise, treat as git diff argument (branch/refspec)
-    diff_ref = diff_arg if diff_arg else f"{get_default_branch()}...HEAD"
+    """Read a patch or compare a single ref to HEAD using PR-style triple-dot semantics."""
+    if diff_arg and Path(diff_arg).is_file():
+        return Path(diff_arg).read_text()
+    diff_ref = diff_arg or get_default_branch()
+    if diff_ref.startswith("-"):
+        message = "A diff ref must not start with '-'"
+        raise DiffHandlerError(message)
+    if ".." not in diff_ref:
+        diff_ref = f"{diff_ref}...HEAD"
     try:
-        diff = subprocess.check_output(["git", "diff", diff_ref], stderr=subprocess.DEVNULL, text=True)
+        return subprocess.check_output(
+            ["git", "diff", "--no-ext-diff", "--no-color", "--no-renames", diff_ref, "--"],
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     except (OSError, subprocess.CalledProcessError) as error:
         message = f"Failed to get git diff for {diff_ref}: {error}"
         raise DiffHandlerError(message) from error
-    else:
-        return diff
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="Select pytest tests based on diff and coverage.")
-    parser.add_argument(
-        "--diff",
-        required=False,
-        help="Path to a diff file or a git ref/branch to diff against (default: main branch).",
-        default=None,
-    )
-    parser.add_argument(
-        "--coverage-file",
-        required=False,
-        help="Path to the coverage file (.coverage sqlite database).",
-        type=Path,
-        default=Path(".coverage"),
-    )
-    parser.add_argument(
-        "--relative-to",
-        required=False,
-        help="Display only tests contained in a folder",
-        type=Path,
-        nargs="+",
-        default=None,
-    )
-    parser.add_argument(
-        "--keep-prefix",
-        required=False,
-        default=True,
-        action="store_true",
-        help="When using --relative-to, determine if the original path should be kept or removed",
-    )
-    parser.add_argument(
-        "--strip-prefix",
-        dest="keep_prefix",
-        action="store_false",
-        help="When using --relative-to, determine if the original path should be kept or removed",
-    )
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging.", default=False)
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Select pytest modules based on diff and historical coverage.")
+    parser.add_argument("--diff", help="Patch file, git ref (compared with ...HEAD), or explicit range.")
+    parser.add_argument("--coverage-file", type=Path, default=Path(".coverage"), help="Coverage SQLite database.")
+    parser.add_argument("--source-root", type=Path, help="Original checkout root for absolute coverage paths.")
+    parser.add_argument("--relative-to", type=Path, nargs="+", help="Limit selection to these files or directories.")
+    parser.add_argument("--keep-prefix", dest="keep_prefix", default=True, action="store_true")
+    parser.add_argument("--strip-prefix", dest="keep_prefix", action="store_false")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument(
-        "--format",
-        required=False,
-        help="Output format",
-        type=Format.argtype,
-        default=Format.pytest,
-        choices=Format,
-    )
-    parser.add_argument(
-        "--source-root",
-        type=Path,
-        help="Original checkout root for absolute coverage paths (for example /fierro).",
-    )
-    args = parser.parse_args(argv)
-
-    if args.debug:
+    parser.add_argument("--format", type=Format, default=Format.pytest, choices=list(Format))
+    arguments = parser.parse_args(argv)
+    if arguments.debug:
         logging.basicConfig(level=logging.DEBUG)
-
     try:
         run(
-            get_diff_content(args.diff),
-            args.coverage_file,
-            args.relative_to,
-            args.keep_prefix,
-            args.format,
+            get_diff_content(arguments.diff),
+            arguments.coverage_file,
+            arguments.relative_to,
+            arguments.keep_prefix,
+            arguments.format,
             display=True,
-            source_root=args.source_root,
+            source_root=arguments.source_root,
         )
-    except (CoverageMapError, SelectionError, DiffHandlerError) as error:
+    except (DiffHandlerError, OSError, ValueError, SyntaxError) as error:
         parser.error(str(error))
+
+
+if __name__ == "__main__":
+    main()

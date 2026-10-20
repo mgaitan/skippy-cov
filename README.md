@@ -59,6 +59,22 @@ git diff > changes.diff
 skippy-cov --diff changes.diff --coverage-file .coverage
 ```
 
+Single refs always use `<ref>...HEAD`; explicit `..` and `...` ranges are preserved.
+Git refs compare committed changes. Use a patch file as above to include working-tree
+changes. Default-branch detection uses local refs and does not contact the remote.
+Without `origin/HEAD`, it checks local `main`/`master` branches, then fetched
+`origin/main`/`origin/master` refs. Fetch the required refs before selecting tests
+in a shallow CI checkout; the comparison still needs a common ancestor.
+
+CLI output is deterministic. `--format lines` emits one target per line;
+`--format json` maps each test module to its selected node IDs, where an empty list
+means the entire module. Entries for the same module are merged. The default
+format quotes paths for copying into a shell command; prefer JSON for automation.
+`--relative-to` accepts files and directories without mutating the selection;
+`--strip-prefix` requires a single scope. Pytest's legacy
+`--skippy-cov-strip-prefix` option is deprecated because the plugin preserves the
+caller's resolved scopes and exact node IDs.
+
 If you omit the `--diff` argument, it will default to the main branch as determined by your `git remote` (usually "main" or "master").
 
 **Advanced:**
