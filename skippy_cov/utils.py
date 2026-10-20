@@ -6,6 +6,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 import coverage
+from coverage.exceptions import CoverageException
 
 from skippy_cov.config_handler import get_config
 
@@ -73,7 +74,8 @@ def _fix_test_name(test_name: str) -> tuple[str, str]:
     >>> _fix_test_name("file.py::class_name::test_name")
     ('file.py', 'class_name::test_name')
     """
-    rhs, lhs = test_name.rsplit("|", 1)[0].split("::", 1)
+    node_id = test_name if test_name.endswith("]") else test_name.rsplit("|", 1)[0]
+    rhs, lhs = node_id.split("::", 1)
     return (rhs, lhs)
 
 
@@ -114,18 +116,65 @@ def filter_by_path(
     return filtered_candidates
 
 
+class CoverageMapError(ValueError):
+    """Coverage data cannot safely identify tests for this checkout."""
+
+
 class CoverageMap:
     db: coverage.CoverageData
 
-    def __init__(self, filepath: Path):
-        self.db = coverage.CoverageData(filepath.name)
-        self.db.read()
+    def __init__(self, filepath: Path, *, source_root: Path | None = None):
+        if not filepath.is_file():
+            message = f"Missing coverage file: {filepath}"
+            raise CoverageMapError(message)
+        self.root = Path.cwd().resolve()
+        self.source_root = source_root.resolve() if source_root else self.root
+        self.db = coverage.CoverageData(str(filepath.resolve()))
+        try:
+            self.db.read()
+            contexts = self.db.measured_contexts()
+            if not any(contexts):
+                message = "Coverage has no pytest contexts; collect with --cov-context=test"
+                raise CoverageMapError(message)
+            for context in contexts - {""}:
+                _fix_test_name(context)
+        except (OSError, CoverageException, ValueError) as error:
+            message = f"Invalid coverage data or pytest context in {filepath}: {error}"
+            raise CoverageMapError(message) from error
+        self.filenames: dict[Path, list[str]] = defaultdict(list)
+        self.unmapped_files = False
+        for filename in self.db.measured_files():
+            measured_path = Path(filename)
+            if measured_path.is_absolute():
+                try:
+                    measured_path = measured_path.relative_to(self.source_root)
+                except ValueError:
+                    self.unmapped_files = True
+                    continue
+            self.filenames[measured_path].append(filename)
+
+    def contexts_by_lineno(self, filepath: Path) -> dict[int, list[str]]:
+        relative_path = filepath.relative_to(self.root) if filepath.is_absolute() else filepath
+        filenames = self.filenames.get(relative_path)
+        if filenames is None:
+            if self.unmapped_files:
+                message = f"Cannot map {filepath} to coverage paths; configure the recorded source root"
+                raise CoverageMapError(message)
+            return {}
+        contexts: dict[int, list[str]] = defaultdict(list)
+        for filename in filenames:
+            for line, line_contexts in self.db.contexts_by_lineno(filename).items():
+                contexts[line].extend(line_contexts)
+        return dict(contexts)
 
     def get_tests(self, filepath: Path) -> list[FileTestCandidate]:
         found_tests: defaultdict[Path, set[str]] = defaultdict(set)
-        for line_tests in self.db.contexts_by_lineno(filepath.as_posix()).values():
+        for line_tests in self.contexts_by_lineno(filepath).values():
             for test in line_tests:
                 if test:
                     src, test = _fix_test_name(test)
-                    found_tests[Path(src)].add(test)
+                    test_path = Path(src)
+                    if test_path.is_absolute():
+                        test_path = test_path.relative_to(self.source_root)
+                    found_tests[test_path].add(test)
         return [FileTestCandidate(path=filepath, tests=tests) for (filepath, tests) in found_tests.items()]

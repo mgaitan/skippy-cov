@@ -10,7 +10,7 @@ from pathlib import Path
 
 from skippy_cov import __version__, select_tests_to_run
 from skippy_cov.diff_handler import DiffHandler
-from skippy_cov.utils import CoverageMap, filter_by_path
+from skippy_cov.utils import CoverageMap, CoverageMapError, filter_by_path
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +40,14 @@ def run(
     keep_prefix: bool,
     fmt: Format = Format.pytest,
     display: bool = False,
+    *,
+    source_root: Path | None = None,
 ) -> set[str]:
     """
     Run the test filter. If `display` = True will also print the output to stdout
     """
     diff_handler = DiffHandler(diff)
-    coverage_map = CoverageMap(coverage_file)
+    coverage_map = CoverageMap(coverage_file, source_root=source_root)
     selected_tests = select_tests_to_run(diff_handler, coverage_map)
     tests = sorted(selected_tests)
     if not tests:
@@ -167,6 +169,11 @@ def main(argv=None):
         default=Format.pytest,
         choices=Format,
     )
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        help="Original checkout root for absolute coverage paths (for example /fierro).",
+    )
     args = parser.parse_args(argv)
 
     if args.debug:
@@ -174,11 +181,15 @@ def main(argv=None):
 
     diff_content = get_diff_content(args.diff) if args.diff is not None else get_diff_content(None)
 
-    run(
-        diff_content,
-        args.coverage_file,
-        args.relative_to,
-        args.keep_prefix,
-        args.format,
-        display=True,
-    )
+    try:
+        run(
+            diff_content,
+            args.coverage_file,
+            args.relative_to,
+            args.keep_prefix,
+            args.format,
+            display=True,
+            source_root=args.source_root,
+        )
+    except CoverageMapError as error:
+        parser.error(str(error))

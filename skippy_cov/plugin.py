@@ -10,6 +10,11 @@ logger = logging.getLogger(__name__)
 
 def pytest_addoption(parser):
     group = parser.getgroup("skippy-cov", "Options for skippy coverage-based collection")
+    group.addoption(
+        "--skippy-cov-source-root",
+        type=Path,
+        help="Original checkout root for absolute coverage paths.",
+    )
 
     group.addoption(
         "--skippy-cov",
@@ -71,6 +76,7 @@ def pytest_configure(config):
         cov_file,
         relative_to,
         keep_prefix,
+        source_root=config.getoption("skippy_cov_source_root"),
     )
     if selected_tests:
         config.args = selected_tests
