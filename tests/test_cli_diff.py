@@ -61,6 +61,16 @@ def test_cli_rejects_missing_coverage(dummy_diff_file, tmp_path, capsys):
     assert "Missing coverage file" in capsys.readouterr().err
 
 
+def test_cli_reports_invalid_diff_ref_without_traceback(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as result:
+        main(["--diff", "missing-base-ref"])
+    assert result.value.code == 2
+    error = capsys.readouterr().err
+    assert "Failed to get git diff" in error
+    assert "Traceback" not in error
+
+
 def test_cli_reports_unmapped_test_context_without_traceback(dummy_diff_file, coverage_file, capsys):
     coverage_path = coverage_file({"foo.py": {"/separate-tests/test_source.py::test_source|run": {1}}})
     with pytest.raises(SystemExit) as result:

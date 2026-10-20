@@ -116,13 +116,20 @@ Only changes to existing function bodies with recorded execution under a test's
 `run` phase are eligible. Import-time execution, setup/teardown coverage,
 declarations, conftest files, non-Python inputs, new/deleted/renamed files and
 unknown coverage require the original pytest selection. Changes to test modules
-are eligible only within existing test bodies. An empty diff or no affected tests
-inside the caller's scope exits with pytest status 5, not a successful test run.
+are eligible only within existing undecorated test bodies; decorated functions
+fall back because their decorators can register shared fixtures. Recorded
+setup/teardown execution is rejected even inside test modules, and recorded
+consumers of inherited tests are included alongside the edited module. Separate
+edit blocks are validated independently, even when Git groups them into one hunk.
+An empty diff or no affected tests inside the caller's scope exits with pytest
+status 5, not a successful test run.
 
 The pytest plugin warns and keeps the original arguments when the baseline or
 impact is unknown. The CLI exits with status 2 for those cases: callers must run
 their full test command instead of treating an error as an empty selection.
 Explicit node IDs and absolute paths passed to pytest retain their scope.
+An explicit `--rootdir` does not change the base used for selected module paths.
+Unresolvable Git refs also warn and preserve the original pytest selection.
 
 Historical coverage is a heuristic, not a proof of all dependencies. Reuse data
 only from a successful complete run, keep its commit SHA alongside the artifact,

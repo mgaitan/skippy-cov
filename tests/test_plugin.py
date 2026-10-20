@@ -75,6 +75,23 @@ def test_absolute_test_file_scope_is_supported(baseline_project, change_file):
     result.assert_outcomes(failed=1, passed=1)
 
 
+@pytest.mark.parametrize(("target", "passed"), [("legacy.py", 1), ("legacy.py::PriceCase::test_price", 0)])
+def test_custom_rootdir_does_not_change_selected_path_base(baseline_project, change_file, target, passed):
+    (baseline_project.path / "tests").mkdir()
+    change_file()
+    result = run_skippy(baseline_project, "--rootdir=tests", target)
+    result.assert_outcomes(failed=1, passed=passed)
+
+
+def test_invalid_diff_ref_preserves_original_selection(baseline_project):
+    result = baseline_project.runpytest_subprocess(
+        "--skippy-cov", "--skippy-cov-diff=missing-base-ref", "legacy.py", "test_other.py"
+    )
+    result.assert_outcomes(passed=3)
+    assert result.ret == 0
+    assert "running the original test selection" in result.stdout.str() + result.stderr.str()
+
+
 def test_missing_coverage_preserves_original_selection(baseline_project, change_file):
     change_file()
     result = run_skippy(baseline_project, coverage_path="missing.coverage")
@@ -94,6 +111,51 @@ def test_changed_shared_setup_preserves_original_selection(baseline_project, cha
     result = run_skippy(baseline_project)
     result.assert_outcomes(passed=3)
     assert "running the original test selection" in result.stdout.str() + result.stderr.str()
+
+
+@pytest.mark.parametrize("covered_module", ["test_fixture", "source"])
+def test_fixture_named_like_test_preserves_all_consumers(baseline_project, change_file, covered_module):
+    baseline_project.makepyfile(
+        test_fixture="import pytest\nfrom source import price\n@pytest.fixture(scope='session')\n"
+        "def test_client():\n    return 1\n"
+        "def test_local(test_client):\n    assert test_client >= price()\n",
+        test_consumer="from test_fixture import test_client\n"
+        "def test_consumer(test_client):\n    assert test_client == 1\n",
+    )
+    baseline_project.runpytest_subprocess(
+        "test_fixture.py",
+        "test_consumer.py",
+        "test_other.py",
+        f"--cov={covered_module}",
+        "--cov-context=test",
+        "--cov-report=",
+    ).assert_outcomes(passed=3)
+    source = (baseline_project.path / "test_fixture.py").read_text().replace("return 1", "return 2")
+    change_file("test_fixture.py", source)
+    result = run_skippy(baseline_project, "test_fixture.py", "test_consumer.py", "test_other.py")
+    result.assert_outcomes(failed=1, passed=2)
+    assert "running the original test selection" in result.stdout.str() + result.stderr.str()
+
+
+def test_inherited_test_changes_include_subclass_module(baseline_project, change_file):
+    baseline_project.makepyfile(
+        test_base="from unittest import TestCase\n"
+        "class BaseCase(TestCase):\n    amount = 1\n"
+        "    def test_amount(self):\n        assert self.amount >= 1\n",
+        test_child="import test_base\nclass ChildCase(test_base.BaseCase):\n    amount = 2\n",
+    )
+    baseline_project.runpytest_subprocess(
+        "test_base.py",
+        "test_child.py",
+        "test_other.py",
+        "--cov=test_base",
+        "--cov-context=test",
+        "--cov-report=",
+    ).assert_outcomes(passed=3)
+    source = (baseline_project.path / "test_base.py").read_text().replace("self.amount >= 1", "self.amount == 1")
+    change_file("test_base.py", source)
+    result = run_skippy(baseline_project, "test_base.py", "test_child.py", "test_other.py")
+    result.assert_outcomes(failed=1, passed=1)
 
 
 @pytest.mark.parametrize(

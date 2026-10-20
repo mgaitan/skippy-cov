@@ -19,8 +19,9 @@ def selection_case(tmp_path, monkeypatch, coverage_file):
         context="test_price.py::test_price|run",
         filename="source.py",
         extra_context=None,
+        original="def price():\n    return 1\n",
+        context_lines=0,
     ):
-        original = "def price():\n    return 1\n"
         Path(filename).parent.mkdir(parents=True, exist_ok=True)
         Path(filename).write_text(source)
         diff = "".join(
@@ -29,7 +30,7 @@ def selection_case(tmp_path, monkeypatch, coverage_file):
                 source.splitlines(keepends=True),
                 fromfile=f"a/{filename}",
                 tofile=f"b/{filename}",
-                n=0,
+                n=context_lines,
             )
         )
         contexts = {context: {2}}
@@ -44,6 +45,26 @@ def selection_case(tmp_path, monkeypatch, coverage_file):
 
 def test_body_change_selects_complete_test_module(selection_case):
     assert selection_case() == [FileTestCandidate(Path("test_price.py"), set())]
+
+
+def test_replacement_does_not_authorize_separate_addition_in_same_hunk(selection_case):
+    original = "def price():\n    return 1\n\n\ndef shared_client():\n    return 1\n"
+    source = original.replace("return 1", "return 2", 1).replace(
+        "def shared_client():\n", "def shared_client():\n    assert False\n"
+    )
+    with pytest.raises(SelectionError, match=r"imports|declarations"):
+        selection_case(source, original=original, context_lines=3)
+
+
+@pytest.mark.parametrize("phase", ["setup", "teardown"])
+def test_test_module_changes_reject_shared_phase_contexts(selection_case, phase):
+    with pytest.raises(SelectionError, match="shared-fixture"):
+        selection_case(
+            "def test_price():\n    return 2\n",
+            original="def test_price():\n    return 1\n",
+            filename="test_price.py",
+            extra_context=f"test_price.py::test_price|{phase}",
+        )
 
 
 @pytest.mark.parametrize("context", ["", "test_price.py::test_price|setup", "test_price.py::test_price|teardown"])

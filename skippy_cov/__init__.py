@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from importlib.metadata import version
+from itertools import groupby
 from pathlib import Path
 
 from unidiff import PatchedFile
@@ -30,7 +31,7 @@ def function_body_lines(file_path: Path, *, tests_only: bool) -> set[int]:
         line
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and (not tests_only or node.name.startswith("test"))
+        and (not tests_only or (node.name.startswith("test") and not node.decorator_list))
         and node.end_lineno is not None
         for line in range(node.body[0].lineno, node.end_lineno + 1)
     }
@@ -45,17 +46,24 @@ def validate_function_changes(
 ) -> None:
     body_lines = function_body_lines(file_path, tests_only=tests_only)
     for hunk in patch:
-        added_lines = {line.target_line_no for line in hunk if line.is_added and line.target_line_no is not None}
-        removed_lines = {line.source_line_no for line in hunk if line.is_removed and line.source_line_no is not None}
-        if not added_lines or not removed_lines or not added_lines <= body_lines:
-            message = f"Changed imports, declarations or untracked code in {file_path}"
-            raise SelectionError(message)
-        if not tests_only and any(
-            not contexts.get(line) or any(not context.endswith("|run") for context in contexts[line])
-            for line in removed_lines
-        ):
-            message = f"Changed lines in {file_path} have import-time, shared-fixture or unknown coverage"
-            raise SelectionError(message)
+        for is_context, block in groupby(hunk, key=lambda line: line.is_context):
+            if is_context:
+                continue
+            changes = list(block)
+            added_lines = {line.target_line_no for line in changes if line.is_added and line.target_line_no is not None}
+            removed_lines = {
+                line.source_line_no for line in changes if line.is_removed and line.source_line_no is not None
+            }
+            if not added_lines or not removed_lines or not added_lines <= body_lines:
+                message = f"Changed imports, declarations or untracked code in {file_path}"
+                raise SelectionError(message)
+            if any(
+                (not tests_only and not contexts.get(line))
+                or any(not context.endswith("|run") for context in contexts.get(line, []))
+                for line in removed_lines
+            ):
+                message = f"Changed lines in {file_path} have import-time, shared-fixture or unknown coverage"
+                raise SelectionError(message)
 
 
 def select_tests_to_run(diff_handler: DiffHandler, coverage_map: CoverageMap) -> list[FileTestCandidate]:
@@ -78,16 +86,15 @@ def select_tests_to_run(diff_handler: DiffHandler, coverage_map: CoverageMap) ->
             message = f"Cannot determine test impact for {file_path}; run the original test selection"
             raise SelectionError(message)
         is_test_module = file_path in known_tests
-        contexts = coverage_map.contexts_by_lineno(file_path) if not is_test_module else {}
+        contexts = coverage_map.contexts_by_lineno(file_path)
         validate_function_changes(file_path, patch, contexts, tests_only=is_test_module)
+        candidates = coverage_map.get_tests(file_path)
         if is_test_module:
             selected_modules.add(file_path)
-        else:
-            candidates = coverage_map.get_tests(file_path)
-            if not candidates:
-                message = f"No test contexts cover {file_path}"
-                raise SelectionError(message)
-            selected_modules.update(candidate.path for candidate in candidates)
+        elif not candidates:
+            message = f"No test contexts cover {file_path}"
+            raise SelectionError(message)
+        selected_modules.update(candidate.path for candidate in candidates)
     for test_path in selected_modules:
         if not test_path.is_file():
             message = f"Selected test module no longer exists: {test_path}"
