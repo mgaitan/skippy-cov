@@ -75,3 +75,15 @@ def test_relative_and_absolute_records_for_same_file_are_combined(coverage_file,
     assert CoverageMap(baseline_path).get_tests(Path("source.py")) == [
         FileTestCandidate(Path("tests/test_source.py"), {"test_source", "test_other"}),
     ]
+
+
+def test_mixed_unmapped_roots_are_rejected_instead_of_losing_consumers(coverage_file, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    baseline_path = coverage_file(
+        {
+            "source.py": {TEST_CONTEXT: {2}},
+            "/another-checkout/source.py": {"tests/test_other.py::test_other|run": {2}},
+        }
+    )
+    with pytest.raises(ValueError, match="root"):
+        CoverageMap(baseline_path).get_tests(Path("source.py"))

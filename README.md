@@ -59,6 +59,9 @@ pytest --skippy-cov --skippy-cov-coverage-file baseline/.coverage --skippy-cov-s
 ```
 
 Paths are matched relative to the checkout root, never guessed from basenames.
+Every recorded source path must map to that root. Mixed baselines from multiple
+absolute checkout roots are rejected rather than silently losing test consumers;
+combine them with coverage's path aliases or collect relative paths first.
 
 The inputs for skippy-cov are the coverage file (default: `.coverage`) and the diff information. By default, the diff is generated in the same way as a pull request (PR) on GitHub: only the changes introduced by your branch compared to the target branch are considered. This is done using the `git diff <target>...HEAD` (triple-dot) syntax.
 

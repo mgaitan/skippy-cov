@@ -142,24 +142,20 @@ class CoverageMap:
             message = f"Invalid coverage data or pytest context in {filepath}: {error}"
             raise CoverageMapError(message) from error
         self.filenames: dict[Path, list[str]] = defaultdict(list)
-        self.unmapped_files = False
         for filename in self.db.measured_files():
             measured_path = Path(filename)
             if measured_path.is_absolute():
                 try:
                     measured_path = measured_path.relative_to(self.source_root)
-                except ValueError:
-                    self.unmapped_files = True
-                    continue
+                except ValueError as error:
+                    message = f"Cannot map {filename} to the recorded source root {self.source_root}"
+                    raise CoverageMapError(message) from error
             self.filenames[measured_path].append(filename)
 
     def contexts_by_lineno(self, filepath: Path) -> dict[int, list[str]]:
         relative_path = filepath.relative_to(self.root) if filepath.is_absolute() else filepath
         filenames = self.filenames.get(relative_path)
         if filenames is None:
-            if self.unmapped_files:
-                message = f"Cannot map {filepath} to coverage paths; configure the recorded source root"
-                raise CoverageMapError(message)
             return {}
         contexts: dict[int, list[str]] = defaultdict(list)
         for filename in filenames:
