@@ -11,7 +11,7 @@ from coverage.exceptions import CoverageException
 
 from skippy_cov.config_handler import get_config
 
-DEFAULT_GLOB_PATTERN = "test_*.py"
+DEFAULT_GLOB_PATTERNS = ("test_*.py", "*_test.py")
 
 
 class FilterCandidatesError(ValueError):
@@ -36,6 +36,8 @@ class FileTestCandidate:
         return self.path == other.path and self.tests == other.tests
 
     def as_set(self) -> set[str]:
+        if not self.tests:
+            return {self.path.as_posix()}
         tests = set()
         for test in self.tests:
             tests.add(f"{self.path.as_posix()}::{test}")
@@ -55,11 +57,12 @@ def is_test_file(file_path: Path) -> bool:
     # config_handler.ConfigHandler should already handle it,
     #   but I want to have something working before sinking more hours into this
     # SEE: https://docs.pytest.org/en/stable/example/pythoncollection.html#changing-naming-conventions
-    cfg = get_config()
-    if bool(cfg) and (patterns := cfg.get_value("python_files")) and isinstance(patterns, str):
-        return any(fnmatch(file_path.name, pattern) for pattern in patterns.split(" "))
-
-    return fnmatch(file_path.name, DEFAULT_GLOB_PATTERN)
+    patterns = get_config().get_value("python_files")
+    if isinstance(patterns, str):
+        patterns = patterns.split()
+    if not isinstance(patterns, (list, tuple)):
+        patterns = DEFAULT_GLOB_PATTERNS
+    return any(fnmatch(file_path.name, pattern) for pattern in patterns if isinstance(pattern, str))
 
 
 def _fix_test_name(test_name: str) -> tuple[str, str]:

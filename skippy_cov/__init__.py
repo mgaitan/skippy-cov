@@ -1,110 +1,99 @@
 from __future__ import annotations
 
 import ast
-import logging
 from importlib.metadata import version
 from pathlib import Path
 
-from skippy_cov.diff_handler import DiffHandler
-from skippy_cov.tests_finder import ASTTestsFinder
-from skippy_cov.utils import CoverageMap, FileTestCandidate, is_test_file
+from unidiff import PatchedFile
 
-logger = logging.getLogger(__name__)
+from skippy_cov.diff_handler import DiffHandler
+from skippy_cov.utils import CoverageMap, FileTestCandidate, is_test_file
 
 __version__ = version("skippy-cov")
 
 
+class SelectionError(ValueError):
+    """The diff has dependencies that historical coverage cannot identify."""
+
+
 def discover_tests_in_file(file_path: Path) -> FileTestCandidate | None:
-    """
-    Discovers tests within a given Python file using AST parsing.
-    Finds top-level functions (sync/async) starting with 'test_' and
-    methods (sync/async) starting with 'test_' within classes
-    starting with 'Test'.
+    """Select a whole test module and leave discovery to pytest."""
+    if is_test_file(file_path) and file_path.is_file():
+        return FileTestCandidate(file_path, set())
+    return None
 
-    Args:
-        file_path: The path to the Python file.
 
-    Returns:
-        A list of test identifiers in pytest format 'file::[Class::]test_name'.
-        Returns an empty list if the file is not a test file, doesn't exist,
-        cannot be read, or contains syntax errors preventing AST parsing.
-    """
-    logger.debug(f"Discovering tests in {file_path} using AST...")
-    if not is_test_file(file_path):
-        logger.debug(f"Skipping AST discovery: File path '{file_path}' doesn't match test file pattern.")
-        return None
-    if not file_path.exists() or not file_path.is_file():
-        logger.debug(f"Skipping AST discovery: File path '{file_path}' does not exist or is not a file.")
-        return None
-    try:
-        tree = ast.parse(file_path.read_text(), filename=file_path.name)
+def function_body_lines(file_path: Path, *, tests_only: bool) -> set[int]:
+    """Find runtime function bodies without reconstructing pytest node IDs."""
+    tree = ast.parse(file_path.read_bytes())
+    return {
+        line
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and (not tests_only or node.name.startswith("test"))
+        and node.end_lineno is not None
+        for line in range(node.body[0].lineno, node.end_lineno + 1)
+    }
 
-    except Exception as e:
-        logger.warning(f"Could not discover tests via AST in '{file_path}' due to unexpected error: {e}")
-        return None
 
-    try:
-        finder = ASTTestsFinder(file_path)
-        finder.visit(tree)
-        found_tests = finder.tests
+def validate_function_changes(
+    file_path: Path,
+    patch: PatchedFile,
+    contexts: dict[int, list[str]],
+    *,
+    tests_only: bool,
+) -> None:
+    body_lines = function_body_lines(file_path, tests_only=tests_only)
+    for hunk in patch:
+        added_lines = {line.target_line_no for line in hunk if line.is_added and line.target_line_no is not None}
+        removed_lines = {line.source_line_no for line in hunk if line.is_removed and line.source_line_no is not None}
+        if not added_lines or not removed_lines or not added_lines <= body_lines:
+            message = f"Changed imports, declarations or untracked code in {file_path}"
+            raise SelectionError(message)
+        if not tests_only and any(
+            not contexts.get(line)
+            or "" in contexts[line]
+            or not any(context.endswith("|run") for context in contexts[line])
+            for line in removed_lines
+        ):
+            message = f"Changed lines in {file_path} have import-time, shared-fixture or unknown coverage"
+            raise SelectionError(message)
 
-        if found_tests:
-            logger.debug(f"Found {len(found_tests)} test(s) in '{file_path}' via AST: {found_tests}")
+
+def select_tests_to_run(diff_handler: DiffHandler, coverage_map: CoverageMap) -> list[FileTestCandidate]:
+    """Select test modules, refusing changes with unknown or shared dependencies."""
+    selected_modules: set[Path] = set()
+    known_tests = {
+        Path(context.rsplit("|", 1)[0].split("::", 1)[0]) for context in coverage_map.db.measured_contexts() if context
+    }
+    for file_path in sorted(diff_handler.changed_files):
+        if file_path.suffix == ".md":
+            continue
+        patch = diff_handler.patches[file_path]
+        if (
+            file_path.suffix != ".py"
+            or file_path.name in {"conftest.py", "__init__.py"}
+            or not file_path.is_file()
+            or patch.is_added_file
+            or patch.is_removed_file
+            or patch.is_rename
+            or not patch
+        ):
+            message = f"Cannot determine test impact for {file_path}; run the original test selection"
+            raise SelectionError(message)
+        is_test_module = file_path in known_tests
+        contexts = coverage_map.contexts_by_lineno(file_path) if not is_test_module else {}
+        validate_function_changes(file_path, patch, contexts, tests_only=is_test_module)
+        if is_test_module:
+            selected_modules.add(file_path)
         else:
-            logger.debug(f"No tests found matching in '{file_path}' via AST.")
-
-    except Exception as e:
-        logger.warning(f"Error during AST traversal of '{file_path}': {e}")
-        return None
-
-    return FileTestCandidate(path=file_path, tests=finder.tests)
-
-
-def select_tests_to_run(
-    diff_handler: DiffHandler,
-    coverage_map: CoverageMap,
-) -> list[FileTestCandidate]:
-    """
-    Determines the set of tests to run based on changed files and coverage.
-    """
-    tests_to_run: list[FileTestCandidate] = []
-
-    logger.debug(f"Processing {len(diff_handler.changed_files)} changed file(s)...")
-    logger.debug(f"Changed files: {diff_handler.changed_files}")
-
-    for file_path in diff_handler.changed_files:
-        # 1. If the changed file is a source file with known coverage
-        if candidates := coverage_map.get_tests(file_path):
-            for candidate in candidates:
-                logger.debug(
-                    f"Source file '{candidate.path}' changed. Adding {len(candidate.tests)}"
-                    " related test(s) from coverage map.",
-                )
-                tests_to_run.append(candidate)
-
-        # 2. If the changed file is a test file itself
-        # Use the discovery function, which internally checks if it's a test file
-        # This handles added/modified test files.
-        # If a test file is changed, all tests in it will be run
-        tests_in_file = discover_tests_in_file(file_path)
-        if tests_in_file:
-            logger.debug(
-                f"Test file '{file_path}' changed or contains tests."
-                f" Adding all {len(tests_in_file.tests)} tests from this file.",
-            )
-            tests_to_run.append(tests_in_file)
-
-        # 3. Handle files not in coverage map and not identified as test files
-        # These might be new source files, documentation, config files etc.
-        # Current logic doesn't explicitly add tests for *new* source files
-        # unless they come with *new* test files (handled by point 2).
-        # If a new source file is added and covered by *existing* tests,
-        # the *old* coverage map won't know about it. This is a limitation.
-        if not tests_in_file and not is_test_file(file_path):
-            logger.debug(
-                f"Changed file '{file_path}' is not in the "
-                "coverage map and not identified as a test file."
-                " No direct tests added for it.",
-            )
-
-    return tests_to_run
+            candidates = coverage_map.get_tests(file_path)
+            if not candidates:
+                message = f"No test contexts cover {file_path}"
+                raise SelectionError(message)
+            selected_modules.update(candidate.path for candidate in candidates)
+    for test_path in selected_modules:
+        if not test_path.is_file():
+            message = f"Selected test module no longer exists: {test_path}"
+            raise SelectionError(message)
+    return [FileTestCandidate(path, set()) for path in sorted(selected_modules)]

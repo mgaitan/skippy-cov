@@ -8,7 +8,7 @@ import sys
 from enum import Enum
 from pathlib import Path
 
-from skippy_cov import __version__, select_tests_to_run
+from skippy_cov import SelectionError, __version__, select_tests_to_run
 from skippy_cov.diff_handler import DiffHandler
 from skippy_cov.utils import CoverageMap, CoverageMapError, filter_by_path
 
@@ -191,5 +191,5 @@ def main(argv=None):
             display=True,
             source_root=args.source_root,
         )
-    except CoverageMapError as error:
+    except (CoverageMapError, SelectionError) as error:
         parser.error(str(error))

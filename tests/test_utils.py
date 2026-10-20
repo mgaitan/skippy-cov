@@ -14,7 +14,9 @@ from skippy_cov.utils import (
 
 @pytest.mark.parametrize("fname,expected", [("test_file.py", True), ("testfile.py", False)])
 def test_noconfig_is_test_file(fname: str, expected: bool, mocker: MockFixture) -> None:
-    mocker.patch("skippy_cov.utils.get_config", return_value=None)
+    config = mocker.Mock()
+    config.get_value.return_value = None
+    mocker.patch("skippy_cov.utils.get_config", return_value=config)
     assert is_test_file(Path(fname)) == expected
 
 
