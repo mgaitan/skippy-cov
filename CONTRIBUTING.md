@@ -9,7 +9,7 @@ You can contribute in many ways:
 
 ## Report Bugs
 
-Report bugs at https://github.com/Shiphero/skippy-cov/issues
+Report bugs at https://github.com/mgaitan/skippy-cov/issues
 
 If you are reporting a bug, please include:
 
@@ -33,7 +33,7 @@ skippy-cov could always use more documentation, whether as part of the official 
 
 ## Submit Feedback
 
-The best way to send feedback is to file an issue at https://github.com/Shiphero/skippy-cov/issues.
+The best way to send feedback is to file an issue at https://github.com/mgaitan/skippy-cov/issues.
 
 If you are proposing a new feature:
 
@@ -62,16 +62,17 @@ git clone git@github.com:YOUR_NAME/skippy-cov.git
 cd skippy-cov
 ```
 
-Then, install and activate the environment with:
+Then install the development environment, including test, lint and type-checking groups:
 
 ```bash
 uv sync
 ```
 
-4. Install pre-commit to run linters/formatters at commit time:
+4. Install prek as an external tool and enable the hooks from `prek.toml`:
 
 ```bash
-uv run pre-commit install
+uv tool install prek
+prek install
 ```
 
 5. Create a branch for local development:
@@ -96,15 +97,17 @@ Now, validate that all unit tests are passing:
 make test
 ```
 
-9. Before raising a pull request you should also run tox.
-   This will run the tests across different versions of Python:
+9. The supported Python versions are 3.12 through 3.15. CI tests all four versions.
+   To reproduce the matrix locally:
 
 ```bash
-tox
+for version in 3.12 3.13 3.14 3.15; do
+    uv run --locked --isolated --no-default-groups --group test --python "$version" pytest
+done
 ```
 
-This requires you to have multiple versions of python installed.
-This step is also triggered in the CI/CD pipeline, so you could also choose to skip this step locally.
+uv can install missing Python interpreters automatically. Run `make check` for
+Ruff, ty and lockfile validation, or `prek run --all-files` for all git hooks.
 
 10. Commit your changes and push your branch to GitHub:
 
@@ -115,6 +118,16 @@ git push origin name-of-your-bugfix-or-feature
 ```
 
 11. Submit a pull request through the GitHub website.
+
+## Releases
+
+The package version lives in `pyproject.toml`; use `uv version --bump patch` to
+prepare a version change. After the change is reviewed and merged, `make release`
+creates the corresponding GitHub release in `mgaitan/skippy-cov`.
+
+The release workflow builds the package and publishes through PyPI Trusted
+Publishing. Configure the PyPI publisher for owner `mgaitan`, repository
+`skippy-cov`, and workflow `release.yml` before publishing a release.
 
 # Pull Request Guidelines
 

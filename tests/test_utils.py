@@ -12,9 +12,7 @@ from skippy_cov.utils import (
 )
 
 
-@pytest.mark.parametrize(
-    "fname,expected", [("test_file.py", True), ("testfile.py", False)]
-)
+@pytest.mark.parametrize("fname,expected", [("test_file.py", True), ("testfile.py", False)])
 def test_noconfig_is_test_file(fname: str, expected: bool, mocker: MockFixture) -> None:
     mocker.patch("skippy_cov.utils.get_config", return_value=None)
     assert is_test_file(Path(fname)) == expected
@@ -94,10 +92,7 @@ def test_filter_paths_prefixed_multiple_paths():
         FileTestCandidate(path=Path("/better/1"), tests=set()),
         FileTestCandidate(path=Path("/better/2"), tests=set()),
     ]
-    assert (
-        filter_by_path(candidates, [Path("/good"), Path("/better")], keep_prefix=True)
-        == expected
-    )
+    assert filter_by_path(candidates, [Path("/good"), Path("/better")], keep_prefix=True) == expected
 
 
 def test_filter_paths_no_prefix_multiple_paths():

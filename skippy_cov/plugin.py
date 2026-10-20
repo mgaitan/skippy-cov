@@ -63,9 +63,7 @@ def pytest_configure(config):
     # Import get_diff_content from __main__ to match CLI logic
     from skippy_cov.__main__ import get_diff_content
 
-    diff_content = (
-        get_diff_content(diff_arg) if diff_arg is not None else get_diff_content(None)
-    )
+    diff_content = get_diff_content(diff_arg) if diff_arg is not None else get_diff_content(None)
 
     relative_to = [Path(x) for x in config.args if x]
     selected_tests = run(

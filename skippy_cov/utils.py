@@ -54,11 +54,7 @@ def is_test_file(file_path: Path) -> bool:
     #   but I want to have something working before sinking more hours into this
     # SEE: https://docs.pytest.org/en/stable/example/pythoncollection.html#changing-naming-conventions
     cfg = get_config()
-    if (
-        bool(cfg)
-        and (patterns := cfg.get_value("python_files"))
-        and isinstance(patterns, str)
-    ):
+    if bool(cfg) and (patterns := cfg.get_value("python_files")) and isinstance(patterns, str):
         return any(fnmatch(file_path.name, pattern) for pattern in patterns.split(" "))
 
     return fnmatch(file_path.name, DEFAULT_GLOB_PATTERN)
@@ -132,7 +128,4 @@ class CoverageMap:
                 if test:
                     src, test = _fix_test_name(test)
                     found_tests[Path(src)].add(test)
-        return [
-            FileTestCandidate(path=filepath, tests=tests)
-            for (filepath, tests) in found_tests.items()
-        ]
+        return [FileTestCandidate(path=filepath, tests=tests) for (filepath, tests) in found_tests.items()]

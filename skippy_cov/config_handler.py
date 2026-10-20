@@ -1,26 +1,10 @@
 from __future__ import annotations
 
 import configparser
-import sys
+import tomllib
 from enum import Enum
 from pathlib import Path
 from typing import ClassVar
-
-"""
-mypy doesn't like this
-try:
-    import tomllib
-except ImportError:
-    import tomli as tomllib
-
-see https://github.com/python/mypy/issues/13914
-"""
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
-
 
 _config: ConfigHandler | None = None
 
@@ -59,7 +43,7 @@ class ConfigFileHandler:
         config.read_string(self.config_path.read_text())
 
         cfgdict = {s: dict(config.items(s)) for s in config.sections()}
-        self.values = cfgdict.get(self.section_name, None)
+        self.values = cfgdict.get(self.section_name)
 
     def _parse_toml(self) -> None:
         config = tomllib.loads(self.config_path.read_text())
@@ -127,9 +111,7 @@ class ConfigHandler:
             see: https://docs.pytest.org/en/stable/reference/customize.html#configuration-file-formats
         """
         for current in [base, *base.absolute().parents]:
-            config = {
-                path.name for path in current.iterdir() if path.name in self.configs
-            }
+            config = {path.name for path in current.iterdir() if path.name in self.configs}
             if config:
                 top_config = sorted(config, key=self.config_priority.index)[0]
                 cls = self.configs[top_config]
