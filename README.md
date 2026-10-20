@@ -66,6 +66,42 @@ You may pass any valid git diff refspec to `--diff`, including triple-dot syntax
 
 See `skippy-cov --help` for more information.
 
+### Coverage baseline
+
+Run skippy-cov from the repository root. Invocation from a Git subdirectory is
+rejected with an explicit diagnostic. The pytest plugin warns and keeps the
+original test selection when baseline validation fails.
+
+The baseline must be a readable coverage database with pytest test contexts,
+generated using `--cov-context=test`. Missing, empty, corrupt or context-free
+data is an error; the CLI exits with status 2 rather than printing an apparently
+valid empty selection.
+
+Validation does not establish baseline completeness or revision provenance. The
+caller must use data from a successful complete test run, retain its commit SHA,
+and compare against that revision, including intervening changes to the base
+branch. A readable database alone does not guarantee a trustworthy selection.
+
+Prefer portable coverage paths when collecting data in another checkout or Docker:
+
+```toml
+[tool.coverage.run]
+relative_files = true
+```
+
+If a baseline already contains absolute paths from another checkout, provide its
+original root explicitly:
+
+```bash
+skippy-cov --coverage-file baseline/.coverage --source-root /fierro
+pytest --skippy-cov --skippy-cov-coverage-file baseline/.coverage --skippy-cov-source-root /fierro
+```
+
+Paths are matched relative to the checkout root, never guessed from basenames.
+Every recorded source path must map to that root. Mixed baselines from multiple
+absolute checkout roots are rejected rather than silently losing test consumers;
+combine them with coverage's path aliases or collect relative paths first.
+
 
 ## Contributing
 

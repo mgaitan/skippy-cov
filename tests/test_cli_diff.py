@@ -22,11 +22,13 @@ index e69de29..4b825dc 100644
 
 
 @pytest.fixture
-def dummy_coverage_file(tmp_path):
-    # Create an empty file for now; actual coverage parsing is not tested here
-    cov_file = tmp_path / ".coverage"
-    cov_file.write_text("")
-    return cov_file
+def dummy_coverage_file(coverage_file):
+    return coverage_file(
+        {
+            "foo.py": {"tests/test_source.py::test_source|run": {1}},
+            "bar.py": {"tests/test_source.py::test_source|run": {1}},
+        }
+    )
 
 
 def test_diff_file_mode(dummy_diff_file, dummy_coverage_file, capsys):
@@ -46,6 +48,23 @@ def test_diff_file_mode(dummy_diff_file, dummy_coverage_file, capsys):
     out = capsys.readouterr()
     assert code == 0, out
     assert "skippy-cov:" not in out.err
+
+
+def test_cli_rejects_missing_coverage(dummy_diff_file, tmp_path, capsys):
+    with pytest.raises(SystemExit) as result:
+        main(["--diff", str(dummy_diff_file[0]), "--coverage-file", str(tmp_path / "missing")])
+    assert result.value.code == 2
+    assert "Missing coverage file" in capsys.readouterr().err
+
+
+def test_cli_reports_unmapped_test_context_without_traceback(dummy_diff_file, coverage_file, capsys):
+    coverage_path = coverage_file({"foo.py": {"/separate-tests/test_source.py::test_source|run": {1}}})
+    with pytest.raises(SystemExit) as result:
+        main(["--diff", str(dummy_diff_file[0]), "--coverage-file", str(coverage_path)])
+    assert result.value.code == 2
+    error = capsys.readouterr().err
+    assert "Cannot map /separate-tests/test_source.py" in error
+    assert "Traceback" not in error
 
 
 def test_diff_git_branch_mode(tmp_path, dummy_coverage_file, capsys):

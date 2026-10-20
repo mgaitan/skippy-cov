@@ -1,15 +1,22 @@
 import logging
+import warnings
 from pathlib import Path
 
 import pytest
 
 from skippy_cov.__main__ import run
+from skippy_cov.utils import CoverageMapError
 
 logger = logging.getLogger(__name__)
 
 
 def pytest_addoption(parser):
     group = parser.getgroup("skippy-cov", "Options for skippy coverage-based collection")
+    group.addoption(
+        "--skippy-cov-source-root",
+        type=Path,
+        help="Original checkout root for absolute coverage paths.",
+    )
 
     group.addoption(
         "--skippy-cov",
@@ -66,12 +73,17 @@ def pytest_configure(config):
     diff_content = get_diff_content(diff_arg) if diff_arg is not None else get_diff_content(None)
 
     relative_to = [Path(x) for x in config.args if x]
-    selected_tests = run(
-        diff_content,
-        cov_file,
-        relative_to,
-        keep_prefix,
-    )
+    try:
+        selected_tests = run(
+            diff_content,
+            cov_file,
+            relative_to,
+            keep_prefix,
+            source_root=config.getoption("skippy_cov_source_root"),
+        )
+    except CoverageMapError as error:
+        warnings.warn(pytest.PytestWarning(f"skippy-cov: {error}; running the original test selection"), stacklevel=2)
+        return
     if selected_tests:
         config.args = selected_tests
     else:
