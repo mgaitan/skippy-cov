@@ -38,31 +38,6 @@ that will list the tests selected.
 
 ## Configuration
 
-The baseline must be a readable coverage database with pytest test contexts,
-generated using `--cov-context=test`. Missing, empty, corrupt or context-free
-data is an error; the CLI exits with status 2 rather than printing an apparently
-valid empty selection.
-
-Prefer portable coverage paths when collecting data in another checkout or Docker:
-
-```toml
-[tool.coverage.run]
-relative_files = true
-```
-
-If a baseline already contains absolute paths from another checkout, provide its
-original root explicitly:
-
-```bash
-skippy-cov --coverage-file baseline/.coverage --source-root /fierro
-pytest --skippy-cov --skippy-cov-coverage-file baseline/.coverage --skippy-cov-source-root /fierro
-```
-
-Paths are matched relative to the checkout root, never guessed from basenames.
-Every recorded source path must map to that root. Mixed baselines from multiple
-absolute checkout roots are rejected rather than silently losing test consumers;
-combine them with coverage's path aliases or collect relative paths first.
-
 The inputs for skippy-cov are the coverage file (default: `.coverage`) and the diff information. By default, the diff is generated in the same way as a pull request (PR) on GitHub: only the changes introduced by your branch compared to the target branch are considered. This is done using the `git diff <target>...HEAD` (triple-dot) syntax.
 
 You can specify the coverage file and a branch or ref to diff against (e.g., the main branch):
@@ -90,6 +65,33 @@ If you omit the `--diff` argument, it will default to the main branch as determi
 You may pass any valid git diff refspec to `--diff`, including triple-dot syntax (e.g., `main...HEAD` or `origin/master...feature-branch`). If you provide a triple-dot ref, it will be used as-is, giving you full control over the comparison range.
 
 See `skippy-cov --help` for more information.
+
+### Coverage baseline
+
+The baseline must be a readable coverage database with pytest test contexts,
+generated using `--cov-context=test`. Missing, empty, corrupt or context-free
+data is an error; the CLI exits with status 2 rather than printing an apparently
+valid empty selection.
+
+Prefer portable coverage paths when collecting data in another checkout or Docker:
+
+```toml
+[tool.coverage.run]
+relative_files = true
+```
+
+If a baseline already contains absolute paths from another checkout, provide its
+original root explicitly:
+
+```bash
+skippy-cov --coverage-file baseline/.coverage --source-root /fierro
+pytest --skippy-cov --skippy-cov-coverage-file baseline/.coverage --skippy-cov-source-root /fierro
+```
+
+Paths are matched relative to the checkout root, never guessed from basenames.
+Every recorded source path must map to that root. Mixed baselines from multiple
+absolute checkout roots are rejected rather than silently losing test consumers;
+combine them with coverage's path aliases or collect relative paths first.
 
 
 ## Contributing
