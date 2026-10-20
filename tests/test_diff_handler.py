@@ -71,3 +71,8 @@ def test_invalid_hunk(invalid_hunk: str) -> None:
     """
     with pytest.raises(DiffHandlerError):
         DiffHandler(invalid_hunk)
+
+
+def test_nonempty_unrecognized_patch_is_not_an_empty_diff():
+    with pytest.raises(DiffHandlerError, match="No supported patch"):
+        DiffHandler("not a diff")

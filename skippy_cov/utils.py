@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
@@ -15,9 +16,9 @@ DEFAULT_GLOB_PATTERNS = ("test_*.py", "*_test.py")
 
 
 class FilterCandidatesError(ValueError):
-    def __init__(self, *args, paths: list[Path], **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *, paths: list[Path]):
         self.message = f"Attempting to relativize based in multiple paths: {paths}"
+        super().__init__(self.message)
 
 
 @dataclass
@@ -80,6 +81,9 @@ def _fix_test_name(test_name: str) -> tuple[str, str]:
     """
     node_id = test_name if test_name.endswith("]") else test_name.rsplit("|", 1)[0]
     rhs, lhs = node_id.split("::", 1)
+    if not rhs or not lhs:
+        message = f"Invalid pytest context: {test_name}"
+        raise ValueError(message)
     return (rhs, lhs)
 
 
@@ -109,15 +113,30 @@ def filter_by_path(
     for candidate in candidates:
         for filepath in from_folders:
             try:
-                relative_path = candidate.path.relative_to(filepath)
+                relative_path = candidate.path.resolve().relative_to(filepath.resolve())
             except ValueError:
                 # The candidate is not within the from_folder, so skip it
                 continue
-            if not keep_prefix:
-                candidate.path = relative_path
-            filtered_candidates.append(candidate)
+            if relative_path == Path("."):
+                relative_path = Path(candidate.path.name)
+            selected_path = candidate.path if keep_prefix else Path(relative_path)
+            filtered_candidates.append(FileTestCandidate(selected_path, set(candidate.tests)))
+            break
 
     return filtered_candidates
+
+
+def merge_candidates(candidates: Iterable[FileTestCandidate]) -> list[FileTestCandidate]:
+    """Union node IDs per module, with whole-module selection taking precedence."""
+    grouped: dict[Path, set[str]] = {}
+    for candidate in candidates:
+        if candidate.path not in grouped:
+            grouped[candidate.path] = set(candidate.tests)
+        elif not candidate.tests:
+            grouped[candidate.path].clear()
+        elif grouped[candidate.path]:
+            grouped[candidate.path].update(candidate.tests)
+    return [FileTestCandidate(path, grouped[path]) for path in sorted(grouped)]
 
 
 class CoverageMapError(ValueError):

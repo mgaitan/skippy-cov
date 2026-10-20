@@ -6,6 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from unidiff import PatchedFile, PatchSet
+from unidiff.errors import UnidiffParseError
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,9 @@ class DiffHandler:
         mapped_changes: defaultdict[Path, str] = defaultdict(str)
         try:
             patch_set = PatchSet(io.StringIO(diff_text))
+            if diff_text.strip() and not patch_set:
+                message = "No supported patch found in the diff"
+                raise DiffHandlerError(message)
 
             for patched_file in patch_set:
                 if patched_file.is_removed_file:
@@ -58,8 +62,8 @@ class DiffHandler:
                         path = path[2:]
                 mapped_changes[Path(path)] = str(patched_file).strip()
                 self.patches[Path(path)] = patched_file
-        except Exception as e:
-            logger.exception("Failed to parse diff using unidiff")
-            raise DiffHandlerError() from e
+        except (UnidiffParseError, ValueError) as error:
+            message = f"Invalid unified diff: {error}"
+            raise DiffHandlerError(message) from error
 
         return mapped_changes

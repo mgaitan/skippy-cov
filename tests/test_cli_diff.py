@@ -81,6 +81,15 @@ def test_cli_reports_unmapped_test_context_without_traceback(dummy_diff_file, co
     assert "Traceback" not in error
 
 
+def test_cli_reports_invalid_patch_without_traceback(tmp_path, dummy_coverage_file, capsys):
+    diff_path = tmp_path / "invalid.diff"
+    diff_path.write_text("not a diff")
+    with pytest.raises(SystemExit) as result:
+        main(["--diff", str(diff_path), "--coverage-file", str(dummy_coverage_file)])
+    assert result.value.code == 2
+    assert "No supported patch" in capsys.readouterr().err
+
+
 def test_diff_git_branch_mode(tmp_path, dummy_coverage_file, capsys):
     # Set up a minimal git repo with a main branch and a change
     import subprocess
