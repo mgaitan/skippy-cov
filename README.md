@@ -77,6 +77,11 @@ generated using `--cov-context=test`. Missing, empty, corrupt or context-free
 data is an error; the CLI exits with status 2 rather than printing an apparently
 valid empty selection.
 
+Validation does not establish baseline completeness or revision provenance. The
+caller must use data from a successful complete test run, retain its commit SHA,
+and compare against that revision, including intervening changes to the base
+branch. A readable database alone does not guarantee a trustworthy selection.
+
 Prefer portable coverage paths when collecting data in another checkout or Docker:
 
 ```toml
