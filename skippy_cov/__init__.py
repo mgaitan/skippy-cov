@@ -51,9 +51,7 @@ def validate_function_changes(
             message = f"Changed imports, declarations or untracked code in {file_path}"
             raise SelectionError(message)
         if not tests_only and any(
-            not contexts.get(line)
-            or "" in contexts[line]
-            or not any(context.endswith("|run") for context in contexts[line])
+            not contexts.get(line) or any(not context.endswith("|run") for context in contexts[line])
             for line in removed_lines
         ):
             message = f"Changed lines in {file_path} have import-time, shared-fixture or unknown coverage"

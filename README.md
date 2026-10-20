@@ -113,7 +113,7 @@ methods, custom function names and parameterizations; skippy-cov does not rebuil
 their node IDs with a separate AST visitor.
 
 Only changes to existing function bodies with recorded execution under a test's
-`run` phase are eligible. Import-time execution, setup/teardown-only coverage,
+`run` phase are eligible. Import-time execution, setup/teardown coverage,
 declarations, conftest files, non-Python inputs, new/deleted/renamed files and
 unknown coverage require the original pytest selection. Changes to test modules
 are eligible only within existing test bodies. An empty diff or no affected tests

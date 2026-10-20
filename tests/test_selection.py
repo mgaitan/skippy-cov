@@ -13,7 +13,13 @@ def selection_case(tmp_path, monkeypatch, coverage_file):
     monkeypatch.chdir(tmp_path)
     Path("test_price.py").write_text("def test_price():\n    assert True\n")
 
-    def select(source="def price():\n    return 2\n", *, context="test_price.py::test_price|run", filename="source.py"):
+    def select(
+        source="def price():\n    return 2\n",
+        *,
+        context="test_price.py::test_price|run",
+        filename="source.py",
+        extra_context=None,
+    ):
         original = "def price():\n    return 1\n"
         Path(filename).parent.mkdir(parents=True, exist_ok=True)
         Path(filename).write_text(source)
@@ -28,6 +34,8 @@ def selection_case(tmp_path, monkeypatch, coverage_file):
         )
         contexts = {context: {2}}
         contexts.setdefault("test_price.py::test_price|run", set()).add(3)
+        if extra_context:
+            contexts.setdefault(extra_context, set()).add(2)
         coverage_path = coverage_file({filename: contexts})
         return select_tests_to_run(DiffHandler(diff), CoverageMap(coverage_path))
 
@@ -42,6 +50,12 @@ def test_body_change_selects_complete_test_module(selection_case):
 def test_import_and_shared_fixture_contexts_require_original_selection(selection_case, context):
     with pytest.raises(SelectionError, match="shared-fixture"):
         selection_case(context=context)
+
+
+@pytest.mark.parametrize("phase", ["setup", "teardown"])
+def test_mixed_run_and_shared_fixture_contexts_require_original_selection(selection_case, phase):
+    with pytest.raises(SelectionError, match="shared-fixture"):
+        selection_case(extra_context=f"test_price.py::test_price|{phase}")
 
 
 @pytest.mark.parametrize(
