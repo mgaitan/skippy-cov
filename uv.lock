@@ -255,7 +255,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "coverage", specifier = ">=7.6" },
+    { name = "coverage", specifier = ">=7.9" },
     { name = "unidiff", specifier = ">=0.7.5" },
 ]
 

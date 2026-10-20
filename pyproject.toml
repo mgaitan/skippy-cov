@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "unidiff >=0.7.5",
-    "coverage>=7.6",
+    "coverage>=7.9",
 ]
 scripts = { "skippy-cov" = "skippy_cov.__main__:main" }
 
@@ -110,6 +110,7 @@ skip_empty = true
 
 [tool.coverage.run]
 branch = true
+core = "ctrace"
 source = ["skippy_cov"]
 
 [project.entry-points.pytest11]

@@ -16,5 +16,5 @@ def test_discover_tests_in_file(mocker: MockerFixture) -> None:
     result = discover_tests_in_file(mock)
     assert result == FileTestCandidate(
         path=mock,
-        tests={"test_bar", "test_foo"},
+        tests=set(),
     )

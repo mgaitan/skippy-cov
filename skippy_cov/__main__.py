@@ -4,12 +4,11 @@ import argparse
 import json
 import logging
 import subprocess
-import sys
 from enum import Enum
 from pathlib import Path
 
-from skippy_cov import __version__, select_tests_to_run
-from skippy_cov.diff_handler import DiffHandler
+from skippy_cov import SelectionError, __version__, select_tests_to_run
+from skippy_cov.diff_handler import DiffHandler, DiffHandlerError
 from skippy_cov.utils import CoverageMap, CoverageMapError, filter_by_path
 
 logger = logging.getLogger(__name__)
@@ -116,9 +115,9 @@ def get_diff_content(diff_arg: str | None = None) -> str:
     diff_ref = diff_arg if diff_arg else f"{get_default_branch()}...HEAD"
     try:
         diff = subprocess.check_output(["git", "diff", diff_ref], stderr=subprocess.DEVNULL, text=True)
-    except Exception as e:
-        print(f"skippy-cov: failed to get git diff for '{diff_ref}': {e}", file=sys.stderr)
-        sys.exit(1)
+    except (OSError, subprocess.CalledProcessError) as error:
+        message = f"Failed to get git diff for {diff_ref}: {error}"
+        raise DiffHandlerError(message) from error
     else:
         return diff
 
@@ -179,11 +178,9 @@ def main(argv=None):
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
 
-    diff_content = get_diff_content(args.diff) if args.diff is not None else get_diff_content(None)
-
     try:
         run(
-            diff_content,
+            get_diff_content(args.diff),
             args.coverage_file,
             args.relative_to,
             args.keep_prefix,
@@ -191,5 +188,5 @@ def main(argv=None):
             display=True,
             source_root=args.source_root,
         )
-    except CoverageMapError as error:
+    except (CoverageMapError, SelectionError, DiffHandlerError) as error:
         parser.error(str(error))

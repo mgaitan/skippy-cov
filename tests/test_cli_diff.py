@@ -7,13 +7,15 @@ from skippy_cov.__main__ import main
 
 
 @pytest.fixture
-def dummy_diff_file(tmp_path):
+def dummy_diff_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "foo.py").write_text("def foo():\n    return 42\n")
     diff_content = """diff --git a/foo.py b/foo.py
 index e69de29..4b825dc 100644
 --- a/foo.py
 +++ b/foo.py
-@@ -0,0 +1,2 @@
-+def foo():
+@@ -2 +2 @@
+-    return 1
 +    return 42
 """
     diff_file = tmp_path / "changes.diff"
@@ -22,11 +24,13 @@ index e69de29..4b825dc 100644
 
 
 @pytest.fixture
-def dummy_coverage_file(coverage_file):
+def dummy_coverage_file(coverage_file, tmp_path):
+    (tmp_path / "tests").mkdir(exist_ok=True)
+    (tmp_path / "tests/test_source.py").write_text("def test_source():\n    assert True\n")
     return coverage_file(
         {
-            "foo.py": {"tests/test_source.py::test_source|run": {1}},
-            "bar.py": {"tests/test_source.py::test_source|run": {1}},
+            "foo.py": {"tests/test_source.py::test_source|run": {2}},
+            "bar.py": {"tests/test_source.py::test_source|run": {2}},
         }
     )
 
@@ -55,6 +59,16 @@ def test_cli_rejects_missing_coverage(dummy_diff_file, tmp_path, capsys):
         main(["--diff", str(dummy_diff_file[0]), "--coverage-file", str(tmp_path / "missing")])
     assert result.value.code == 2
     assert "Missing coverage file" in capsys.readouterr().err
+
+
+def test_cli_reports_invalid_diff_ref_without_traceback(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as result:
+        main(["--diff", "missing-base-ref"])
+    assert result.value.code == 2
+    error = capsys.readouterr().err
+    assert "Failed to get git diff" in error
+    assert "Traceback" not in error
 
 
 def test_cli_reports_unmapped_test_context_without_traceback(dummy_diff_file, coverage_file, capsys):

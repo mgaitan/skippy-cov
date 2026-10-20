@@ -1,90 +1,56 @@
-import logging
 import warnings
 from pathlib import Path
 
 import pytest
 
-from skippy_cov.__main__ import run
+from skippy_cov import SelectionError
+from skippy_cov.__main__ import get_diff_content, run
+from skippy_cov.diff_handler import DiffHandlerError
 from skippy_cov.utils import CoverageMapError
-
-logger = logging.getLogger(__name__)
 
 
 def pytest_addoption(parser):
     group = parser.getgroup("skippy-cov", "Options for skippy coverage-based collection")
-    group.addoption(
-        "--skippy-cov-source-root",
-        type=Path,
-        help="Original checkout root for absolute coverage paths.",
-    )
+    group.addoption("--skippy-cov", action="store_true", help="Enable conservative coverage-based selection")
+    group.addoption("--skippy-cov-diff", help="Path to a diff file or git ref to compare")
+    group.addoption("--skippy-cov-coverage-file", type=Path, default=Path(".coverage"))
+    group.addoption("--skippy-cov-source-root", type=Path, help="Original checkout root for coverage paths")
+    group.addoption("--skippy-cov-keep-prefix", dest="skippy_cov_keep_prefix", action="store_true", default=True)
+    group.addoption("--skippy-cov-strip-prefix", dest="skippy_cov_keep_prefix", action="store_false")
 
-    group.addoption(
-        "--skippy-cov",
-        required=False,
-        dest="skippy_cov",
-        action="store_true",
-        help="Enable skippy-cov",
-    )
 
-    group.addoption(
-        "--skippy-cov-diff",
-        required=False,
-        help="Path to a diff file or a git ref/branch to diff against (default: main branch).",
-        default=None,
-    )
-    group.addoption(
-        "--skippy-cov-coverage-file",
-        required=False,
-        help="Path to the coverage file (.coverage sqlite database).",
-        type=Path,
-        default=Path(".coverage"),
-    )
-    group.addoption(
-        "--skippy-cov-keep-prefix",
-        required=False,
-        default=True,
-        dest="skippy_cov_keep_prefix",
-        action="store_true",
-        help="When using --skippy-cov-relative-to, determine if the original path should be kept or removed",
-    )
-    group.addoption(
-        "--skippy-cov-strip-prefix",
-        dest="skippy_cov_keep_prefix",
-        action="store_false",
-        help="When using --skippy-cov-relative-to, determine if the original path should be kept or removed",
-    )
+def scoped_targets(selected: set[str], original: list[str], working_directory: Path) -> list[str]:
+    """Intersect selected modules with the caller's paths and exact node IDs."""
+    selected_paths = {str((working_directory / target).resolve()): target for target in selected}
+    targets: set[str] = set()
+    for argument in original:
+        requested_path = Path(argument.split("::", 1)[0]).resolve()
+        if requested_path.is_dir() and "::" not in argument:
+            targets.update(
+                target for path, target in selected_paths.items() if Path(path).is_relative_to(requested_path)
+            )
+        elif str(requested_path) in selected_paths:
+            targets.add(argument)
+    return sorted(targets)
 
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_configure(config):
-    """
-    Attempts to filter tests using skippy-cov
-    """
-    skippy_cov = config.getoption("skippy_cov")
-    diff_arg = config.getoption("skippy_cov_diff")
-    cov_file = config.getoption("skippy_cov_coverage_file")
-    keep_prefix = config.getoption("skippy_cov_keep_prefix")
-    if not skippy_cov:
+    """Narrow collection only when both coverage and the diff are trustworthy."""
+    if not config.getoption("skippy_cov"):
         return
-
-    # Import get_diff_content from __main__ to match CLI logic
-    from skippy_cov.__main__ import get_diff_content
-
-    diff_content = get_diff_content(diff_arg) if diff_arg is not None else get_diff_content(None)
-
-    relative_to = [Path(x) for x in config.args if x]
     try:
-        selected_tests = run(
-            diff_content,
-            cov_file,
-            relative_to,
-            keep_prefix,
+        selected = run(
+            get_diff_content(config.getoption("skippy_cov_diff")),
+            config.getoption("skippy_cov_coverage_file"),
+            None,
+            True,
             source_root=config.getoption("skippy_cov_source_root"),
         )
-    except CoverageMapError as error:
+    except (CoverageMapError, SelectionError, DiffHandlerError, OSError, ValueError, SyntaxError) as error:
         warnings.warn(pytest.PytestWarning(f"skippy-cov: {error}; running the original test selection"), stacklevel=2)
         return
-    if selected_tests:
-        config.args = selected_tests
-    else:
-        pytest.exit("skippy-cov: couldn't find any tests to filter.", returncode=5)
+    targets = scoped_targets(selected, config.args, Path.cwd())
+    if not targets:
+        pytest.exit("skippy-cov: no tests affected within the requested selection", returncode=5)
+    config.args = targets

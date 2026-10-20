@@ -6,14 +6,9 @@ from enum import Enum
 from pathlib import Path
 from typing import ClassVar
 
-_config: ConfigHandler | None = None
-
 
 def get_config() -> ConfigHandler:
-    global _config
-    if not _config:
-        _config = ConfigHandler(Path.cwd())
-    return _config
+    return ConfigHandler(Path.cwd())
 
 
 class ConfigFormat(Enum):

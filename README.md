@@ -87,6 +87,7 @@ Prefer portable coverage paths when collecting data in another checkout or Docke
 ```toml
 [tool.coverage.run]
 relative_files = true
+core = "ctrace"
 ```
 
 If a baseline already contains absolute paths from another checkout, provide its
@@ -101,6 +102,40 @@ Paths are matched relative to the checkout root, never guessed from basenames.
 Every recorded source path must map to that root. Mixed baselines from multiple
 absolute checkout roots are rejected rather than silently losing test consumers;
 combine them with coverage's path aliases or collect relative paths first.
+On Python 3.14+, coverage defaults to
+`sysmon`, which does not support dynamic test contexts; collect the baseline with
+`core = "ctrace"` as shown above.
+
+### Conservative selection and fallback
+
+Selection runs whole test modules. Pytest discovers unittest classes, inherited
+methods, custom function names and parameterizations; skippy-cov does not rebuild
+their node IDs with a separate AST visitor.
+
+Only changes to existing function bodies with recorded execution under a test's
+`run` phase are eligible. Import-time execution, setup/teardown coverage,
+declarations, conftest files, non-Python inputs, new/deleted/renamed files and
+unknown coverage require the original pytest selection. Changes to test modules
+are eligible only within existing undecorated test bodies; decorated functions
+fall back because their decorators can register shared fixtures. Recorded
+setup/teardown execution is rejected even inside test modules, and recorded
+consumers of inherited tests are included alongside the edited module. Separate
+edit blocks are validated independently, even when Git groups them into one hunk.
+An empty diff or no affected tests inside the caller's scope exits with pytest
+status 5, not a successful test run.
+
+The pytest plugin warns and keeps the original arguments when the baseline or
+impact is unknown. The CLI exits with status 2 for those cases: callers must run
+their full test command instead of treating an error as an empty selection.
+Explicit node IDs and absolute paths passed to pytest retain their scope.
+An explicit `--rootdir` does not change the base used for selected module paths.
+Unresolvable Git refs also warn and preserve the original pytest selection.
+
+Historical coverage is a heuristic, not a proof of all dependencies. Reuse data
+only from a successful complete run, keep its commit SHA alongside the artifact,
+and compare against that commit, including intervening changes to the base branch.
+Dynamic imports, cross-test state and shared fixtures still warrant periodic full
+runs and a complete suite before merging.
 
 
 ## Contributing

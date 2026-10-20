@@ -5,7 +5,7 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from unidiff import PatchSet
+from unidiff import PatchedFile, PatchSet
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class DiffHandler:
         Raises:
             FileNotFoundError: If the specified diff file does not exist.
         """
+        self.patches: dict[Path, PatchedFile] = {}
         self.changes = self.parse_diff(contents)
 
     @property
@@ -56,6 +57,7 @@ class DiffHandler:
                     if path.startswith("b/"):
                         path = path[2:]
                 mapped_changes[Path(path)] = str(patched_file).strip()
+                self.patches[Path(path)] = patched_file
         except Exception as e:
             logger.exception("Failed to parse diff using unidiff")
             raise DiffHandlerError() from e

@@ -36,9 +36,7 @@ GetConfigFun = Callable[[], config_handler.ConfigHandler]
 
 @pytest.fixture
 def get_config() -> Generator[GetConfigFun, None, None]:
-    config_handler._config = None  # reset borg
     yield lambda: config_handler.get_config()
-    config_handler._config = None  # reset borg
 
 
 def test_config_handler_precedence(get_config: GetConfigFun, mocker: MockFixture):
@@ -87,7 +85,6 @@ def test_config_handler_parser(
         "skippy_cov.config_handler.Path.read_text",
         return_value=request.getfixturevalue(config_fixture),
     )
-    assert config_handler._config is None  # sanity check
     cfg = get_config()
     assert cfg.get_value("addopts") == "--cov"
     assert cfg.get_value("pythonpath") == "/src"
