@@ -61,8 +61,10 @@ skippy-cov --diff changes.diff --coverage-file .coverage
 
 Single refs always use `<ref>...HEAD`; explicit `..` and `...` ranges are preserved.
 Git refs compare committed changes. Use a patch file as above to include working-tree
-changes. Default-branch detection uses local refs and does not contact the remote;
-fetch the required refs before selecting tests in a shallow CI checkout.
+changes. Default-branch detection uses local refs and does not contact the remote.
+Without `origin/HEAD`, it checks local `main`/`master` branches, then fetched
+`origin/main`/`origin/master` refs. Fetch the required refs before selecting tests
+in a shallow CI checkout; the comparison still needs a common ancestor.
 
 CLI output is deterministic. `--format lines` emits one target per line;
 `--format json` maps each test module to its selected node IDs, where an empty list

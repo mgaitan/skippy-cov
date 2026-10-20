@@ -56,15 +56,20 @@ def get_default_branch() -> str:
             text=True,
         ).strip()
     except (OSError, subprocess.CalledProcessError):
-        for branch in ("main", "master"):
+        for reference in (
+            "refs/heads/main",
+            "refs/heads/master",
+            "refs/remotes/origin/main",
+            "refs/remotes/origin/master",
+        ):
             try:
                 subprocess.check_output(
-                    ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
+                    ["git", "show-ref", "--verify", reference],
                     stderr=subprocess.DEVNULL,
                 )
             except (OSError, subprocess.CalledProcessError):
                 continue
-            return branch
+            return reference.removeprefix("refs/heads/").removeprefix("refs/remotes/")
     return "main"
 
 

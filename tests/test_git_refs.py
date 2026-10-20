@@ -42,6 +42,37 @@ def test_default_branch_is_detected_from_local_remote_head(diverged_repository):
     assert get_default_branch() == "origin/main"
 
 
+@pytest.mark.parametrize("branch", ["main", "master"])
+@pytest.mark.parametrize("shallow", [False, True])
+def test_default_branch_uses_fetched_refs_in_detached_checkout(
+    diverged_repository, tmp_path, monkeypatch, branch, shallow
+):
+    if branch == "master":
+        subprocess.run(["git", "branch", "-m", "main", "master"], check=True)
+    checkout = tmp_path / "checkout"
+    depth = ["--depth=2"] if shallow else []
+    subprocess.run(
+        ["git", "clone", "--branch", "feature", *depth, tmp_path.as_uri(), str(checkout)],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(checkout)
+    subprocess.run(
+        ["git", "fetch", *depth, "origin", f"{branch}:refs/remotes/origin/{branch}"], check=True, capture_output=True
+    )
+    subprocess.run(["git", "checkout", "--detach"], check=True, capture_output=True)
+    subprocess.run(["git", "branch", "-D", "feature"], check=True, capture_output=True)
+    subprocess.run(["git", "update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD"], check=True)
+    assert subprocess.check_output(["git", "for-each-ref", "refs/heads"], text=True).strip() == ""
+    is_shallow = subprocess.check_output(["git", "rev-parse", "--is-shallow-repository"], text=True).strip()
+    assert is_shallow == str(shallow).lower()
+    expected_diff = get_diff_content(f"origin/{branch}")
+    assert "+    return 2" in expected_diff
+    assert "base_only.py" not in expected_diff
+    assert get_default_branch() == f"origin/{branch}"
+    assert get_diff_content() == expected_diff
+
+
 def test_directory_with_branch_name_is_not_read_as_a_patch(diverged_repository):
     Path("main").mkdir()
     assert "+    return 2" in get_diff_content("main")
