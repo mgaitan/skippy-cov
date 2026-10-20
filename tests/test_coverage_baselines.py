@@ -1,8 +1,9 @@
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from skippy_cov.utils import CoverageMap, FileTestCandidate
+from skippy_cov.utils import CoverageMap, CoverageMapError, FileTestCandidate
 
 TEST_CONTEXT = "tests/test_source.py::test_source|run"
 
@@ -87,3 +88,29 @@ def test_mixed_unmapped_roots_are_rejected_instead_of_losing_consumers(coverage_
     )
     with pytest.raises(ValueError, match="root"):
         CoverageMap(baseline_path).get_tests(Path("source.py"))
+
+
+def test_unmapped_absolute_test_context_is_rejected_during_validation(coverage_file):
+    baseline_path = coverage_file({"source.py": {"/separate-tests/test_source.py::test_source|run": {2}}})
+    with pytest.raises(CoverageMapError, match=r"Cannot map /separate-tests/test_source\.py"):
+        CoverageMap(baseline_path)
+
+
+def test_source_root_maps_absolute_test_contexts(coverage_file, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    baseline_path = coverage_file({"/fierro/source.py": {"/fierro/tests/test_source.py::test_source|run": {2}}})
+    assert CoverageMap(baseline_path, source_root=Path("/fierro")).get_tests(Path("source.py")) == [
+        FileTestCandidate(Path("tests/test_source.py"), {"test_source"}),
+    ]
+
+
+@pytest.mark.parametrize("absolute_paths", [False, True])
+def test_subdirectory_invocation_is_rejected_explicitly(coverage_file, tmp_path, monkeypatch, absolute_paths):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    source = tmp_path / "source.py" if absolute_paths else Path("source.py")
+    baseline_path = coverage_file({source: {TEST_CONTEXT: {2}}})
+    subdirectory = tmp_path / "src"
+    subdirectory.mkdir()
+    monkeypatch.chdir(subdirectory)
+    with pytest.raises(CoverageMapError, match="Run skippy-cov from the repository root"):
+        CoverageMap(baseline_path)

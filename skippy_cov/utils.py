@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
 from fnmatch import fnmatch
@@ -128,6 +129,7 @@ class CoverageMap:
             message = f"Missing coverage file: {filepath}"
             raise CoverageMapError(message)
         self.root = Path.cwd().resolve()
+        self._validate_working_directory()
         self.source_root = source_root.resolve() if source_root else self.root
         self.db = coverage.CoverageData(str(filepath.resolve()))
         try:
@@ -137,20 +139,34 @@ class CoverageMap:
                 message = "Coverage has no pytest contexts; collect with --cov-context=test"
                 raise CoverageMapError(message)
             for context in contexts - {""}:
-                _fix_test_name(context)
+                self._relative_path(_fix_test_name(context)[0])
         except (OSError, CoverageException, ValueError) as error:
             message = f"Invalid coverage data or pytest context in {filepath}: {error}"
             raise CoverageMapError(message) from error
         self.filenames: dict[Path, list[str]] = defaultdict(list)
         for filename in self.db.measured_files():
-            measured_path = Path(filename)
-            if measured_path.is_absolute():
-                try:
-                    measured_path = measured_path.relative_to(self.source_root)
-                except ValueError as error:
-                    message = f"Cannot map {filename} to the recorded source root {self.source_root}"
-                    raise CoverageMapError(message) from error
-            self.filenames[measured_path].append(filename)
+            self.filenames[self._relative_path(filename)].append(filename)
+
+    def _validate_working_directory(self) -> None:
+        try:
+            checkout_root = subprocess.check_output(
+                ["git", "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return
+        if self.root != Path(checkout_root).resolve():
+            message = f"Run skippy-cov from the repository root: {checkout_root} (current directory: {self.root})"
+            raise CoverageMapError(message)
+
+    def _relative_path(self, filename: str) -> Path:
+        path = Path(filename)
+        if not path.is_absolute():
+            return path
+        try:
+            return path.relative_to(self.source_root)
+        except ValueError as error:
+            message = f"Cannot map {filename} to the recorded source root {self.source_root}"
+            raise CoverageMapError(message) from error
 
     def contexts_by_lineno(self, filepath: Path) -> dict[int, list[str]]:
         relative_path = filepath.relative_to(self.root) if filepath.is_absolute() else filepath
@@ -169,8 +185,5 @@ class CoverageMap:
             for test in line_tests:
                 if test:
                     src, test = _fix_test_name(test)
-                    test_path = Path(src)
-                    if test_path.is_absolute():
-                        test_path = test_path.relative_to(self.source_root)
-                    found_tests[test_path].add(test)
+                    found_tests[self._relative_path(src)].add(test)
         return [FileTestCandidate(path=filepath, tests=tests) for (filepath, tests) in found_tests.items()]

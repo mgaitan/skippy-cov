@@ -68,6 +68,10 @@ See `skippy-cov --help` for more information.
 
 ### Coverage baseline
 
+Run skippy-cov from the repository root. Invocation from a Git subdirectory is
+rejected with an explicit diagnostic. The pytest plugin warns and keeps the
+original test selection when baseline validation fails.
+
 The baseline must be a readable coverage database with pytest test contexts,
 generated using `--cov-context=test`. Missing, empty, corrupt or context-free
 data is an error; the CLI exits with status 2 rather than printing an apparently

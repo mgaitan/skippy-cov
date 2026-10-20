@@ -57,6 +57,16 @@ def test_cli_rejects_missing_coverage(dummy_diff_file, tmp_path, capsys):
     assert "Missing coverage file" in capsys.readouterr().err
 
 
+def test_cli_reports_unmapped_test_context_without_traceback(dummy_diff_file, coverage_file, capsys):
+    coverage_path = coverage_file({"foo.py": {"/separate-tests/test_source.py::test_source|run": {1}}})
+    with pytest.raises(SystemExit) as result:
+        main(["--diff", str(dummy_diff_file[0]), "--coverage-file", str(coverage_path)])
+    assert result.value.code == 2
+    error = capsys.readouterr().err
+    assert "Cannot map /separate-tests/test_source.py" in error
+    assert "Traceback" not in error
+
+
 def test_diff_git_branch_mode(tmp_path, dummy_coverage_file, capsys):
     # Set up a minimal git repo with a main branch and a change
     import subprocess

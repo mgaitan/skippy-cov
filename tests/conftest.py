@@ -1,6 +1,8 @@
 import coverage
 import pytest
 
+pytest_plugins = ("pytester",)
+
 
 @pytest.fixture
 def coverage_file(tmp_path):
