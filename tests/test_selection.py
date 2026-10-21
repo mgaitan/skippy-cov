@@ -81,7 +81,7 @@ def test_new_parameterized_test_is_selected_with_its_module(selection_case):
 def test_test_module_import_changes_require_original_selection(selection_case):
     with pytest.raises(SelectionError):
         selection_case(
-            "import helper\ndef test_price():\n    assert True\n",
+            "def test_price():\n    assert True\n\nimport helper\n",
             original="def test_price():\n    assert True\n",
             filename="test_price.py",
         )
