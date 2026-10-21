@@ -31,8 +31,7 @@ def function_body_lines(file_path: Path) -> set[int]:
     return {
         line
         for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.end_lineno is not None
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.end_lineno is not None
         for line in range(node.body[0].lineno, node.end_lineno + 1)
     }
 
@@ -93,7 +92,9 @@ def validate_function_changes(
                 line.source_line_no for line in changes if line.is_removed and line.source_line_no is not None
             }
             removed_values = {
-                line.source_line_no: line.value for line in changes if line.is_removed and line.source_line_no is not None
+                line.source_line_no: line.value
+                for line in changes
+                if line.is_removed and line.source_line_no is not None
             }
             added_values = {
                 line.target_line_no: line.value for line in changes if line.is_added and line.target_line_no is not None

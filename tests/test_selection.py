@@ -54,7 +54,9 @@ def test_structural_change_in_separate_edit_block_selects_file_consumers(selecti
     source = original.replace("return 1", "return 2", 1).replace(
         "def shared_client():\n", "def shared_client():\n    assert False\n"
     )
-    assert selection_case(source, original=original, context_lines=3) == [FileTestCandidate(Path("test_price.py"), set())]
+    assert selection_case(source, original=original, context_lines=3) == [
+        FileTestCandidate(Path("test_price.py"), set())
+    ]
 
 
 @pytest.mark.parametrize("phase", ["setup", "teardown"])
