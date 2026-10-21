@@ -132,7 +132,7 @@ def select_tests_to_run(diff_handler: DiffHandler, coverage_map: CoverageMap) ->
     """Select test modules, refusing changes with unknown or shared dependencies."""
     selected_modules: set[Path] = set()
     known_tests = {
-        coverage_map._relative_path(Path(context.rsplit("|", 1)[0].split("::", 1)[0]))
+        coverage_map._relative_path(context.rsplit("|", 1)[0].split("::", 1)[0])
         for context in coverage_map.db.measured_contexts()
         if context
     }
