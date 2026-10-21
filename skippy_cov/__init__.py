@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from importlib.metadata import version
 from itertools import groupby
 from pathlib import Path
@@ -24,17 +25,54 @@ def discover_tests_in_file(file_path: Path) -> FileTestCandidate | None:
     return None
 
 
-def function_body_lines(file_path: Path, *, tests_only: bool) -> set[int]:
+def function_body_lines(file_path: Path) -> set[int]:
     """Find runtime function bodies without reconstructing pytest node IDs."""
     tree = ast.parse(file_path.read_bytes())
     return {
         line
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and (not tests_only or (node.name.startswith("test") and not node.decorator_list))
         and node.end_lineno is not None
         for line in range(node.body[0].lineno, node.end_lineno + 1)
     }
+
+
+def test_function_lines(file_path: Path) -> set[int]:
+    tree = ast.parse(file_path.read_bytes())
+    lines = set()
+    for node in ast.walk(tree):
+        if (
+            not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            or not node.name.startswith("test")
+            or node.end_lineno is None
+        ):
+            continue
+        if any(
+            not (
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and decorator.func.attr == "parametrize"
+                and isinstance(decorator.func.value, ast.Attribute)
+                and decorator.func.value.attr == "mark"
+                and isinstance(decorator.func.value.value, ast.Name)
+                and decorator.func.value.value.id == "pytest"
+            )
+            for decorator in node.decorator_list
+        ):
+            continue
+        start = min([node.lineno, *(decorator.lineno for decorator in node.decorator_list)])
+        lines.update(range(start, node.end_lineno + 1))
+    return lines
+
+
+def is_safe_test_deletion(line: str) -> bool:
+    line = line.lstrip()
+    return (
+        not line.strip()
+        or line.startswith("#")
+        or re.match(r"def\s+test\w*\s*\(", line) is not None
+        or re.match(r"@pytest\.mark\.parametrize\s*\(", line) is not None
+    )
 
 
 def validate_function_changes(
@@ -44,7 +82,7 @@ def validate_function_changes(
     *,
     tests_only: bool,
 ) -> None:
-    body_lines = function_body_lines(file_path, tests_only=tests_only)
+    eligible_lines = test_function_lines(file_path) if tests_only else function_body_lines(file_path)
     for hunk in patch:
         for is_context, block in groupby(hunk, key=lambda line: line.is_context):
             if is_context:
@@ -54,12 +92,35 @@ def validate_function_changes(
             removed_lines = {
                 line.source_line_no for line in changes if line.is_removed and line.source_line_no is not None
             }
-            if not added_lines or not removed_lines or not added_lines <= body_lines:
+            removed_values = {
+                line.source_line_no: line.value for line in changes if line.is_removed and line.source_line_no is not None
+            }
+            added_values = {
+                line.target_line_no: line.value for line in changes if line.is_added and line.target_line_no is not None
+            }
+            invalid_test_deletion = tests_only and any(
+                not is_safe_test_deletion(removed_values[line]) and not contexts.get(line) for line in removed_lines
+            )
+            if (
+                (not added_lines and not removed_lines)
+                or (not tests_only and (not added_lines or not removed_lines or not added_lines <= eligible_lines))
+                or (
+                    tests_only
+                    and any(
+                        line not in eligible_lines and not is_safe_test_deletion(added_values[line])
+                        for line in added_lines
+                    )
+                )
+                or invalid_test_deletion
+            ):
                 message = f"Changed imports, declarations or untracked code in {file_path}"
                 raise SelectionError(message)
             if any(
                 (not tests_only and not contexts.get(line))
-                or any(not context.endswith("|run") for context in contexts.get(line, []))
+                or (
+                    not (tests_only and is_safe_test_deletion(removed_values[line]))
+                    and any(not context.endswith("|run") for context in contexts.get(line, []))
+                )
                 for line in removed_lines
             ):
                 message = f"Changed lines in {file_path} have import-time, shared-fixture or unknown coverage"

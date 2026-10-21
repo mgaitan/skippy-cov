@@ -68,6 +68,25 @@ def test_test_module_changes_reject_shared_phase_contexts(selection_case, phase)
         )
 
 
+def test_new_parameterized_test_is_selected_with_its_module(selection_case):
+    original = "def test_price():\n    assert True\n"
+    source = original + "\n@pytest.mark.parametrize('value', [1, 2])\ndef test_added(value):\n    assert value\n"
+    assert selection_case(
+        source,
+        original=original,
+        filename="test_price.py",
+    ) == [FileTestCandidate(Path("test_price.py"), set())]
+
+
+def test_test_module_import_changes_require_original_selection(selection_case):
+    with pytest.raises(SelectionError):
+        selection_case(
+            "import helper\ndef test_price():\n    assert True\n",
+            original="def test_price():\n    assert True\n",
+            filename="test_price.py",
+        )
+
+
 @pytest.mark.parametrize("context", ["", "test_price.py::test_price|setup", "test_price.py::test_price|teardown"])
 def test_import_and_shared_fixture_contexts_require_original_selection(selection_case, context):
     with pytest.raises(SelectionError, match="shared-fixture"):

@@ -136,8 +136,9 @@ If the baseline has no consumers for the file, callers must use the original
 pytest selection. This file-level fallback uses known coverage instead of
 immediately escalating to the entire suite.
 
-Changes to test modules are eligible only within existing undecorated test
-bodies; imports, decorated functions, and recorded setup/teardown execution
+Changes to test modules select the whole module when edits stay within test
+functions, including newly added tests and `pytest.mark.parametrize` cases.
+Imports, other decorators, fixtures, and recorded setup/teardown execution
 still require the original selection because they can affect shared test setup.
 Conftest files, non-Python inputs, new/deleted/renamed files, and unknown
 coverage also require the original selection. Recorded consumers of inherited
