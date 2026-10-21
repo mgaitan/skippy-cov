@@ -89,6 +89,30 @@ def test_test_module_import_changes_require_original_selection(selection_case):
         )
 
 
+def test_absolute_test_contexts_keep_test_modules_strict(tmp_path, monkeypatch, coverage_file):
+    monkeypatch.chdir(tmp_path)
+    test_path = Path("test_price.py")
+    original = "def test_price():\n    assert True\n"
+    source = original + "\nimport helper\n"
+    test_path.write_text(source)
+    diff = "".join(
+        difflib.unified_diff(
+            original.splitlines(keepends=True),
+            source.splitlines(keepends=True),
+            fromfile="a/test_price.py",
+            tofile="b/test_price.py",
+            n=0,
+        )
+    )
+    absolute_test = str(tmp_path / test_path)
+    contexts = {f"{absolute_test}::test_price|run": {2}}
+    coverage_path = coverage_file({absolute_test: contexts})
+    coverage_map = CoverageMap(coverage_path, source_root=tmp_path)
+
+    with pytest.raises(SelectionError, match=r"imports|declarations"):
+        select_tests_to_run(DiffHandler(diff), coverage_map)
+
+
 @pytest.mark.parametrize("context", ["", "test_price.py::test_price|setup", "test_price.py::test_price|teardown"])
 def test_import_and_shared_fixture_contexts_require_original_selection(selection_case, context):
     with pytest.raises(SelectionError, match="shared-fixture"):
