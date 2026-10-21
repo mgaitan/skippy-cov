@@ -87,11 +87,19 @@ def select_tests_to_run(diff_handler: DiffHandler, coverage_map: CoverageMap) ->
             raise SelectionError(message)
         is_test_module = file_path in known_tests
         contexts = coverage_map.contexts_by_lineno(file_path)
-        validate_function_changes(file_path, patch, contexts, tests_only=is_test_module)
         candidates = coverage_map.get_tests(file_path)
         if is_test_module:
+            validate_function_changes(file_path, patch, contexts, tests_only=True)
             selected_modules.add(file_path)
-        elif not candidates:
+        else:
+            try:
+                validate_function_changes(file_path, patch, contexts, tests_only=False)
+            except SelectionError:
+                if not candidates:
+                    raise
+                selected_modules.update(candidate.path for candidate in candidates)
+                continue
+        if not is_test_module and not candidates:
             message = f"No test contexts cover {file_path}"
             raise SelectionError(message)
         selected_modules.update(candidate.path for candidate in candidates)
