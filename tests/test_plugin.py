@@ -102,7 +102,7 @@ def test_missing_coverage_preserves_original_selection(baseline_project, change_
 def test_legacy_test_body_change_runs_whole_module(baseline_project, change_file):
     source = (baseline_project.path / "legacy.py").read_text().replace("price() == 1", "price() == 99")
     change_file("legacy.py", source)
-    run_skippy(baseline_project).assert_outcomes(failed=1, passed=1)
+    run_skippy(baseline_project).assert_outcomes(failed=1, passed=2)
 
 
 def test_changed_shared_setup_preserves_original_selection(baseline_project, change_file):

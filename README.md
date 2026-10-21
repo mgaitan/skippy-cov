@@ -128,15 +128,22 @@ Selection runs whole test modules. Pytest discovers unittest classes, inherited
 methods, custom function names and parameterizations; skippy-cov does not rebuild
 their node IDs with a separate AST visitor.
 
-Only changes to existing function bodies with recorded execution under a test's
-`run` phase are eligible. Import-time execution, setup/teardown coverage,
-declarations, conftest files, non-Python inputs, new/deleted/renamed files and
-unknown coverage require the original pytest selection. Changes to test modules
-are eligible only within existing undecorated test bodies; decorated functions
-fall back because their decorators can register shared fixtures. Recorded
-setup/teardown execution is rejected even inside test modules, and recorded
-consumers of inherited tests are included alongside the edited module. Separate
-edit blocks are validated independently, even when Git groups them into one hunk.
+Changes to existing source function bodies with recorded execution under a
+test's `run` phase get precise selection. If a source diff also changes imports,
+declarations, setup/teardown behavior, or otherwise cannot be narrowed safely,
+skippy-cov selects every test module recorded as a consumer of that source file.
+If the baseline has no consumers for the file, callers must use the original
+pytest selection. This file-level fallback uses known coverage instead of
+immediately escalating to the entire suite.
+
+Changes to test modules select the whole module when edits stay within test
+functions, including newly added tests and `pytest.mark.parametrize` cases.
+Imports, other decorators, fixtures, and recorded setup/teardown execution
+still require the original selection because they can affect shared test setup.
+Conftest files, non-Python inputs, new/deleted/renamed files, and unknown
+coverage also require the original selection. Recorded consumers of inherited
+tests are included alongside the edited module. Separate edit blocks are
+validated independently, even when Git groups them into one hunk.
 An empty diff or no affected tests inside the caller's scope exits with pytest
 status 5, not a successful test run.
 
