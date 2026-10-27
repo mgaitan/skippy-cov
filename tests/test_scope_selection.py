@@ -545,6 +545,72 @@ def test_cli_explicit_import_mode_handles_duplicate_module_names(pytester):
     assert {test.path.as_posix() for test in tests} == {"one/test_same.py", "two/test_same.py"}
 
 
+def test_github_action_validates_baseline_and_selects(scope_project, monkeypatch):
+    import os
+    import shutil
+
+    project, revision = scope_project
+    action = Path(__file__).resolve().parents[1] / ".github/actions/select/action.py"
+    change_price(project)
+    git(project, "add", "source.py")
+    git(project, "commit", "-qm", "change")
+    directory = project.path / ".skippy-baseline"
+    directory.mkdir()
+    shutil.copy(project.path / ".coverage", directory / ".coverage")
+    (directory / "sha.txt").write_text(revision)
+    mock_gh = project.path / "gh"
+    mock_gh.write_text(
+        f"#!{sys.executable}\nimport json, sys\n"
+        f"revision = {revision!r}\n"
+        "if any('/actions/caches' in arg for arg in sys.argv):\n"
+        "    print(json.dumps([{'actions_caches': ["
+        "{'key': f'cov-2-{revision}', 'ref': 'refs/heads/main', 'created_at': '2026-02'}, "
+        "{'key': f'cov-1-{revision}', 'ref': 'refs/heads/main', 'created_at': '2026-01'}]}]))\n"
+        "else:\n"
+        "    print(json.dumps({'head_sha': revision, 'head_branch': 'main', 'event': 'push', "
+        "'conclusion': 'failure' if sys.argv[-1].endswith('/2') else 'success', "
+        "'path': '.github/workflows/full.yml'}))\n"
+    )
+    mock_gh.chmod(0o755)
+    output = project.path / "output"
+    env = os.environ | {
+        "PATH": f"{project.path}{os.pathsep}{os.environ['PATH']}",
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_REPOSITORY": "example/project",
+        "BASE_REF": revision,
+        "BASE_BRANCH": "main",
+        "WORKFLOW": ".github/workflows/full.yml",
+        "CACHE_PREFIX": "cov",
+        "BASELINE": revision,
+        "BASELINE_ERROR": "",
+        "CACHE_HIT": "true",
+        "BASELINE_PATH": str(directory),
+        "SOURCE_ROOT": "",
+        "GRANULARITY": "test",
+        "COLLECTION_GROUPS": '[["test_helpers.py"], ["test_external.py"]]',
+        "PYTEST_ARGS": "[]",
+    }
+
+    def execute(command):
+        output.write_text("")
+        subprocess.run([sys.executable, str(action), command], cwd=project.path, env=env, check=True)
+        lines = output.read_text().splitlines()
+        return {lines[i].split("<<", 1)[0]: lines[i + 1] for i in range(0, len(lines), 3)}
+
+    assert execute("baseline") == {"baseline": revision, "cache-key": f"cov-1-{revision}"}
+    result = execute("select")
+    assert result["selected"] == "true"
+    assert json.loads(result["targets"]) == {"test_helpers.py": ["test_price"], "test_external.py": ["test_external"]}
+    (directory / "sha.txt").write_text("wrong")
+    assert execute("select")["reason"] == "Coverage cache revision does not match the full run"
+    env["CACHE_HIT"] = "false"
+    assert execute("select")["reason"] == "No exact coverage cache for the baseline revision"
+    env["WORKFLOW"] = ".github/workflows/other.yml"
+    assert execute("baseline")["reason"] == (
+        "No eligible baseline from a successful full workflow with proven ancestry (history may be insufficient)"
+    )
+
+
 @pytest.mark.parametrize(
     ("original", "updated", "message"),
     [

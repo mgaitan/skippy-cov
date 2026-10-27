@@ -241,6 +241,81 @@ Dynamic imports, cross-test state and shared fixtures still warrant periodic ful
 runs and a complete suite before merging.
 
 
+## GitHub Actions
+
+The composite action at `.github/actions/select` finds the newest accessible
+coverage cache from a successful full workflow on the target branch whose commit
+is an ancestor of both the checkout and target ref. It verifies the cached SHA,
+then returns `baseline`, `selected`, `targets` (JSON) and `reason`. A missing,
+invalid or unsafe baseline returns `selected: false`; the caller chooses its
+full workflow. An empty JSON object is a successful empty selection.
+
+After **all** full-suite jobs have succeeded, combine their coverage databases
+and save the baseline directory in the full workflow:
+
+```yaml
+- run: |
+    mkdir -p .skippy-baseline
+    cp .coverage .skippy-baseline/.coverage
+    printf '%s\n' "$GITHUB_SHA" > .skippy-baseline/sha.txt
+- uses: actions/cache/save@v4
+  with:
+    path: .skippy-baseline
+    key: skippy-baseline-v1-${{ github.run_id }}-${{ github.sha }}
+```
+
+Save only on pushes to the target branch; the action also verifies that the
+whole workflow ultimately succeeded. Configure the PR job with `actions: read`
+and `contents: read`, a checkout with an `origin` remote,
+and the project environment with pytest and a version of skippy-cov containing
+this action's collection options. For example:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 1
+- id: skippy
+  uses: mgaitan/skippy-cov/.github/actions/select@<release-tag>
+  with:
+    base-ref: ${{ github.event.pull_request.base.sha }}
+    base-branch: ${{ github.event.pull_request.base.ref }}
+    workflow: .github/workflows/ci-full.yml
+    cache-prefix: skippy-baseline-v1
+    history-depth: 100
+    collection-groups: '[["tests/client"], ["tests/server"]]'
+    pytest-args: '["--import-mode=importlib"]'
+    # source-root: /original/container/checkout
+- if: steps.skippy.outputs.selected != 'true'
+  run: echo "Full suite required: $REASON"
+  env:
+    REASON: ${{ steps.skippy.outputs.reason }}
+```
+
+For shallow checkouts, the action performs one `git fetch --no-tags --depth=N`
+from `origin` for the checked-out HEAD and target commit, where `N` is
+`history-depth` (default `100`, a positive integer). Prefer the PR's exact base
+SHA as above; a target ref must otherwise be available locally or fetchable from
+`origin`. The fetched target is stored in `refs/skippy-cov/base`, without changing
+the checkout or local branches. Complete checkouts with an available target do
+not fetch. This bounds history depth per tip, not total transfer bytes (merge
+history and repository contents can still be large).
+
+The action never automatically deepens again or downloads the full history.
+It selects a cache only when Git proves its revision is an ancestor of **both**
+HEAD and the target in the available history. An older baseline beyond the
+shallow boundary, unrelated history, or a failed fetch yields `selected: false`
+and the full-suite fallback, never an assumed ancestry. Increase `history-depth`
+if baselines are commonly older; `fetch-depth: 0` remains an explicit option
+when full history is preferred.
+
+Use the exact same `baseline-path` when saving and restoring: GitHub cache
+versions include the path. The cache prefix must identify a compatible test
+environment and complete suite. Capture per-test coverage with
+`--cov-context=test` for individual selection. Collection runs in the action's
+job environment, so install the project's test dependencies there or run the
+job in the appropriate container. Test execution, runner setup, service setup,
+and decisions about empty selections remain with the caller.
+
 ## Contributing
 
 See `CONTRIBUTING.md` for information on how to contribute to the project.
