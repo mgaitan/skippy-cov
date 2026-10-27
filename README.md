@@ -124,15 +124,71 @@ On Python 3.14+, coverage defaults to
 
 ### Conservative selection and fallback
 
-Selection runs whole test modules. Pytest discovers unittest classes, inherited
+By default, selection runs whole test modules. Pytest discovers unittest classes, inherited
 methods, custom function names and parameterizations; skippy-cov does not rebuild
 their node IDs with a separate AST visitor.
 
+### Individual test selection (opt-in)
+
+The default granularity is `module`. Individual selection is an opt-in heuristic:
+caches and state shared between tests can hide consumers from coverage. Keep
+module selection as the default and run the complete suite before merging.
+To select individual tests, use:
+
+```bash
+pytest --skippy-cov --skippy-cov-diff=BASELINE_SHA..HEAD --skippy-cov-granularity=test
+skippy-cov --diff BASELINE_SHA..HEAD --granularity test --format json
+```
+
+The coverage database **must have been collected at `BASELINE_SHA`**, with
+`--cov-context=test`. Its revision cannot be inferred from a coverage database
+alone; providing coverage from a different commit can produce an incorrect
+selection. A single Git ref uses its merge base with HEAD, while an explicit
+`BASELINE_SHA..HEAD` range uses that exact baseline. The new revision must be
+HEAD. With a patch file, provide `--base-ref BASELINE_SHA` to the CLI or
+`--skippy-cov-base-ref=BASELINE_SHA` to pytest so the old source is available.
+
+This mode parses function, async-function, method, nested-function, and class
+ranges from the old source without executing it. A function-body change selects
+the tests recorded anywhere in that function's baseline runtime body, including
+consumers in other test files. It uses old line numbers for coverage, so shifted
+definitions and insertions into previously uncovered branches remain eligible.
+Unrelated sibling functions and methods do not share a selection.
+Decorated functions and methods inside decorated scopes require the original
+selection: a decorator such as `functools.lru_cache` can return a value without
+executing the recorded function body for every consumer.
+
+**Every new test is included independently of coverage and source impact.**
+Changed test modules run in full, including new functions, inherited methods,
+and new parameter cases. Removing lines without known runtime coverage, including
+parameter declarations, requires the original selection. The plugin keeps pytest's
+original collection and then deselects unaffected tests, respecting requested paths, exact node IDs, `-k`,
+and `-m`. For an affected parameterized test it runs all currently collected
+cases within that original scope. The CLI resolves current IDs through an
+isolated pytest collection; pytest must be installed for this mode. It keeps
+stdout suitable for the selected output format and protects the baseline
+coverage database during collection. Test paths/discovery configuration apply;
+the CLI's collection clears execution `addopts` and `PYTEST_ADDOPTS`. Apply
+execution filters to the eventual pytest invocation, or use the plugin to keep
+the full original pytest argument semantics.
+
+New standalone functions, signature/decorator changes, class attributes/bases,
+module declarations, ambiguous scope matches, unknown/import-time coverage,
+and shared setup/teardown require the original selection. Recorded file consumers
+cannot establish every import-time dependency, such as a constant imported by
+another test module. The plugin preserves the original selection with a diagnostic;
+the CLI reports that it cannot select safely. New
+source files and non-Python changes retain that full-selection fallback.
+The test suite compares individual, module, and full runs with real coverage,
+including a shared-session-fixture regression where narrowing could hide a
+failing second consumer. Historical coverage remains an impact heuristic.
+
+### Module selection rules
+
 Changes to existing source function bodies with recorded execution under a
 test's `run` phase select the consuming test modules. If a source diff also
-changes imports, declarations, or otherwise needs file-level selection,
-skippy-cov selects every test module recorded as a consumer of that source file,
-provided the file has no recorded setup/teardown execution. Shared fixtures may
+changes imports, declarations, or otherwise has unknown impact,
+skippy-cov preserves the original selection. Shared fixtures may
 execute only for the first test that requests them, so those contexts cannot
 identify every test that reuses their results. A file-level fallback involving
 setup/teardown therefore requires the original pytest selection, as does a file
@@ -141,6 +197,8 @@ function-body changes covered only during `run` in the same source file.
 
 Changes to test modules select the whole module when edits stay within test
 functions, including newly added tests and `pytest.mark.parametrize` cases.
+Removing lines with unknown or import-time coverage requires the original
+selection; comments and blank-looking text inside string literals are code.
 Imports, other decorators, fixtures, and recorded setup/teardown execution
 still require the original selection because they can affect shared test setup.
 Conftest files, non-Python inputs, new/deleted/renamed files, and unknown

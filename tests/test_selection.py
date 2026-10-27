@@ -49,14 +49,13 @@ def test_body_change_selects_complete_test_module(selection_case):
     assert selection_case() == [FileTestCandidate(Path("test_price.py"), set())]
 
 
-def test_structural_change_in_separate_edit_block_selects_file_consumers(selection_case):
+def test_structural_change_in_separate_edit_block_requires_original_selection(selection_case):
     original = "def price():\n    return 1\n\n\ndef shared_client():\n    return 1\n"
     source = original.replace("return 1", "return 2", 1).replace(
         "def shared_client():\n", "def shared_client():\n    assert False\n"
     )
-    assert selection_case(source, original=original, context_lines=3) == [
-        FileTestCandidate(Path("test_price.py"), set())
-    ]
+    with pytest.raises(SelectionError):
+        selection_case(source, original=original, context_lines=3)
 
 
 @pytest.mark.parametrize("phase", ["setup", "teardown"])
@@ -144,21 +143,23 @@ def test_mixed_run_and_shared_fixture_contexts_require_original_selection(select
         "def price():\n    return 1\n    print('new path')\n",
     ],
 )
-def test_structural_source_changes_select_known_file_consumers(selection_case, source):
-    assert selection_case(source) == [FileTestCandidate(Path("test_price.py"), set())]
+def test_structural_source_changes_require_original_selection(selection_case, source):
+    with pytest.raises(SelectionError):
+        selection_case(source)
 
 
-def test_structural_source_changes_select_all_file_consumers(selection_case):
-    assert selection_case(
-        "RATE = 2\ndef price():\n    return 2\n",
-        extra_context="test_shared.py::test_shared|run",
-    ) == [FileTestCandidate(Path("test_price.py"), set()), FileTestCandidate(Path("test_shared.py"), set())]
+def test_known_file_consumers_cannot_replace_unknown_import_consumers(selection_case):
+    with pytest.raises(SelectionError):
+        selection_case(
+            "RATE = 2\ndef price():\n    return 2\n",
+            extra_context="test_shared.py::test_shared|run",
+        )
 
 
 @pytest.mark.parametrize("phase", ["setup", "teardown"])
 @pytest.mark.parametrize("source", ["def price():\n    return 2\n", "RATE = 2\ndef price():\n    return 1\n"])
 def test_source_with_shared_phase_contexts_requires_original_selection(selection_case, phase, source):
-    with pytest.raises(SelectionError, match="shared-fixture"):
+    with pytest.raises(SelectionError):
         selection_case(source, extra_context=f"test_shared.py::test_shared|{phase}", context_lines=3)
 
 
