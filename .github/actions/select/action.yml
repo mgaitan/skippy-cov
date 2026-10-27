@@ -1,0 +1,74 @@
+name: Select tests with skippy-cov
+description: Restore a full-run coverage baseline and select impacted tests
+inputs:
+  base-ref:
+    description: Git ref for the target branch (available in the checkout)
+    required: true
+  base-branch:
+    description: Target branch name where successful full runs publish baselines
+    required: true
+  workflow:
+    description: Path of the full test workflow, for example .github/workflows/ci-full.yml
+    required: true
+  cache-prefix:
+    description: Cache key prefix identifying the full test suite and environment
+    required: true
+  baseline-path:
+    description: Directory saved in the cache, containing .coverage and sha.txt
+    default: .skippy-baseline
+  source-root:
+    description: Original checkout root for absolute paths recorded in coverage
+    default: ''
+  granularity:
+    description: module or test
+    default: test
+  collection-groups:
+    description: JSON array of arrays of pytest paths, one process per group
+    default: '[]'
+  pytest-args:
+    description: JSON array of pytest collection arguments
+    default: '[]'
+outputs:
+  baseline:
+    description: Commit of the successful full run used for the cache and diff
+    value: ${{ steps.baseline.outputs.baseline }}
+  selected:
+    description: Whether selection succeeded (true or false)
+    value: ${{ steps.selection.outputs.selected }}
+  targets:
+    description: JSON object mapping test paths to selected pytest names
+    value: ${{ steps.selection.outputs.targets }}
+  reason:
+    description: Fallback reason when selection did not succeed
+    value: ${{ steps.selection.outputs.reason }}
+runs:
+  using: composite
+  steps:
+    - id: baseline
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
+        WORKFLOW: ${{ inputs.workflow }}
+        CACHE_PREFIX: ${{ inputs.cache-prefix }}
+        GH_TOKEN: ${{ github.token }}
+      run: python "$GITHUB_ACTION_PATH/action.py" baseline
+    - id: cache
+      if: steps.baseline.outputs.baseline != ''
+      uses: actions/cache/restore@v4
+      continue-on-error: true
+      with:
+        path: ${{ inputs.baseline-path }}
+        key: ${{ steps.baseline.outputs.cache-key }}
+    - id: selection
+      shell: bash
+      env:
+        BASELINE: ${{ steps.baseline.outputs.baseline }}
+        BASELINE_ERROR: ${{ steps.baseline.outputs.reason }}
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        BASELINE_PATH: ${{ inputs.baseline-path }}
+        SOURCE_ROOT: ${{ inputs.source-root }}
+        GRANULARITY: ${{ inputs.granularity }}
+        COLLECTION_GROUPS: ${{ inputs.collection-groups }}
+        PYTEST_ARGS: ${{ inputs.pytest-args }}
+      run: python "$GITHUB_ACTION_PATH/action.py" select
