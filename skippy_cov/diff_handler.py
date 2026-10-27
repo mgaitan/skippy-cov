@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import io
-import logging
 import subprocess
-from collections import defaultdict
 from pathlib import Path
 
 from unidiff import PatchedFile, PatchSet
 from unidiff.errors import UnidiffParseError
-
-logger = logging.getLogger(__name__)
 
 
 class DiffHandlerError(Exception):
@@ -18,23 +14,16 @@ class DiffHandlerError(Exception):
 
 class DiffHandler:
     def __init__(self, contents: str, *, base_ref: str | None = None):
-        """
-        Args:
-            diff_file: The contents of the file containing the full output of a 'git diff' command.
-
-        Raises:
-            FileNotFoundError: If the specified diff file does not exist.
-        """
-        self.patches: dict[Path, PatchedFile] = {}
+        """Parse a unified diff and optionally retain its baseline revision."""
         self.base_ref = base_ref
-        self.changes = self.parse_diff(contents)
+        self.patches = self.parse_diff(contents)
 
     @property
     def changed_files(self) -> set[Path]:
-        return set(self.changes.keys())
+        return set(self.patches)
 
     def __getitem__(self, key: Path) -> str:
-        return self.changes[key]
+        return str(self.patches[key]).strip()
 
     def base_source(self, path: Path) -> bytes:
         """Read source in the coverage revision without importing it."""
@@ -49,17 +38,9 @@ class DiffHandler:
             message = f"Cannot read baseline source for {path} at {self.base_ref}"
             raise DiffHandlerError(message) from error
 
-    def parse_diff(self, diff_text: str) -> defaultdict[Path, str]:
-        """
-        Parses the full text output of 'git diff' using the 'unidiff' library.
-
-        Args:
-            diff_text: A string containing the full output of a 'git diff' command.
-
-        Returns:
-            A set of unique file paths affected by the diff and the affected diff
-        """
-        mapped_changes: defaultdict[Path, str] = defaultdict(str)
+    def parse_diff(self, diff_text: str) -> dict[Path, PatchedFile]:
+        """Map changed paths to parsed patches, rejecting unsupported diffs."""
+        patches: dict[Path, PatchedFile] = {}
         try:
             patch_set = PatchSet(io.StringIO(diff_text))
             if diff_text.strip() and not patch_set:
@@ -75,10 +56,9 @@ class DiffHandler:
                     path = patched_file.target_file
                     if path.startswith("b/"):
                         path = path[2:]
-                mapped_changes[Path(path)] = str(patched_file).strip()
-                self.patches[Path(path)] = patched_file
+                patches[Path(path)] = patched_file
         except (UnidiffParseError, ValueError) as error:
             message = f"Invalid unified diff: {error}"
             raise DiffHandlerError(message) from error
 
-        return mapped_changes
+        return patches

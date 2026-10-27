@@ -21,8 +21,6 @@ from skippy_cov.utils import (
     select_collected_tests,
 )
 
-logger = logging.getLogger(__name__)
-
 
 class Format(StrEnum):
     pytest = "pytest"
