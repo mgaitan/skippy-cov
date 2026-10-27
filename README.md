@@ -172,6 +172,25 @@ the CLI's collection clears execution `addopts` and `PYTEST_ADDOPTS`. Apply
 execution filters to the eventual pytest invocation, or use the plugin to keep
 the full original pytest argument semantics.
 
+For independent suites, repeat `--collect-group` to collect each group in a
+separate Python process. All groups are combined before impact selection. Pass
+collection options explicitly, including options normally set in `addopts`:
+
+```bash
+skippy-cov --diff BASELINE_SHA..HEAD --granularity test --format json \
+  --collect-group tests/client tests/shared --collect-group tests/server \
+  --pytest-arg=--import-mode=importlib
+```
+
+Each group accepts one or more paths; use the resulting node IDs with the
+original suite commands. `--relative-to` still filters the final output, so omit
+it when all groups must be represented. Pytest arguments apply to every group;
+configuration `addopts` and `PYTEST_ADDOPTS` remain cleared. Pass only arguments
+needed for collection, without execution or coverage options. A failed group or
+unsafe impact exits nonzero rather than returning a partial selection; an empty
+JSON object is a successful empty selection. Collection imports test modules,
+but does not run tests or fixtures, and uses a temporary coverage database.
+
 New standalone functions, signature/decorator changes, class attributes/bases,
 module declarations, ambiguous scope matches, unknown/import-time coverage,
 and shared setup/teardown require the original selection. Recorded file consumers

@@ -28,13 +28,20 @@ class Format(StrEnum):
     lines = "lines"
 
 
-def collect_current_tests(scopes: list[Path] | None) -> list[CollectedTest]:
+def collect_current_tests(scopes: list[Path] | None, pytest_args: list[str] | None = None) -> list[CollectedTest]:
     """Let pytest resolve inheritance, custom discovery, and parameter IDs for the CLI."""
     with tempfile.TemporaryDirectory(prefix="skippy-collection-") as directory:
         root = Path(directory)
         output = root / "tests.json"
         result = subprocess.run(
-            [sys.executable, "-m", "skippy_cov.collect", str(output), *map(str, scopes or [])],
+            [
+                sys.executable,
+                "-m",
+                "skippy_cov.collect",
+                str(output),
+                json.dumps(pytest_args or []),
+                *map(str, scopes or []),
+            ],
             capture_output=True,
             text=True,
             env=os.environ | {"COVERAGE_FILE": str(root / ".coverage"), "PYTEST_ADDOPTS": ""},
@@ -62,11 +69,18 @@ def run(
     granularity: Granularity = Granularity.module,
     base_ref: str | None = None,
     collect: bool = False,
+    collection_groups: list[list[Path]] | None = None,
+    pytest_args: list[str] | None = None,
 ) -> set[str]:
     """Select tests and optionally print deterministic CLI output."""
     diff_handler = DiffHandler(diff, base_ref=base_ref)
     coverage_map = CoverageMap(coverage_file, source_root=source_root)
-    discovered = collect_current_tests(relative_to) if collect else []
+    discovered = []
+    if collect:
+        for group in collection_groups or [relative_to]:
+            discovered.extend(
+                collect_current_tests(group, pytest_args) if pytest_args else collect_current_tests(group)
+            )
     test_files = {test.path for test in discovered} | {test.definition for test in discovered if test.definition}
     selected_tests = select_tests_to_run(diff_handler, coverage_map, granularity=granularity, test_files=test_files)
     if collect:
@@ -178,12 +192,26 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--granularity", type=Granularity, choices=list(Granularity), default=Granularity.module)
     parser.add_argument("--base-ref", help="Coverage revision; required for individual selection with a patch file.")
     parser.add_argument("--relative-to", type=Path, nargs="+", help="Limit selection to these files or directories.")
+    parser.add_argument(
+        "--collect-group",
+        type=Path,
+        nargs="+",
+        action="append",
+        help="Collect paths in a separate pytest process; repeat for independent groups.",
+    )
+    parser.add_argument(
+        "--pytest-arg",
+        action="append",
+        help="Pass one collection argument to pytest; repeat as needed (use --pytest-arg=VALUE).",
+    )
     parser.add_argument("--keep-prefix", dest="keep_prefix", default=True, action="store_true")
     parser.add_argument("--strip-prefix", dest="keep_prefix", action="store_false")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--format", type=Format, default=Format.pytest, choices=list(Format))
     arguments = parser.parse_args(argv)
+    if (arguments.collect_group or arguments.pytest_arg) and arguments.granularity != Granularity.test:
+        parser.error("--collect-group and --pytest-arg require --granularity test")
     if arguments.debug:
         logging.basicConfig(level=logging.DEBUG)
     try:
@@ -200,6 +228,8 @@ def main(argv: list[str] | None = None) -> None:
             if arguments.granularity == Granularity.test
             else None,
             collect=arguments.granularity == Granularity.test,
+            collection_groups=arguments.collect_group,
+            pytest_args=arguments.pytest_arg,
         )
     except (DiffHandlerError, OSError, ValueError, SyntaxError) as error:
         parser.error(str(error))

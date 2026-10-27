@@ -31,11 +31,13 @@ class Collector:
 
 
 def main() -> None:
-    output_path, *scopes = sys.argv[1:]
+    output_path, arguments, *scopes = sys.argv[1:]
     collector = Collector(Path(output_path))
     # Discovery settings still apply. Execution-only addopts must not run tests
     # or write to the caller's coverage database while resolving node IDs.
-    raise SystemExit(pytest.main(["--collect-only", "-q", "-o", "addopts=", *scopes], plugins=[collector]))
+    raise SystemExit(
+        pytest.main([*json.loads(arguments), "--collect-only", "-q", "-o", "addopts=", *scopes], plugins=[collector])
+    )
 
 
 if __name__ == "__main__":

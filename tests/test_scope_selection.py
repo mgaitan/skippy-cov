@@ -479,6 +479,72 @@ def test_cli_collection_errors_are_not_an_empty_selection(pytester):
         collect_current_tests(None)
 
 
+def test_cli_isolated_groups_combine_inventory(scope_project):
+    project, revision = scope_project
+    change_price(project)
+    for group in ("client", "server"):
+        directory = project.path / group
+        directory.mkdir()
+        (directory / "conftest.py").write_text("import registry\nregistry.register()\n")
+        (directory / "test_same.py").write_text(
+            "import pytest\nclass Base:\n"
+            "    @pytest.mark.parametrize('value', [1, 2])\n"
+            "    def test_inherited(self, value):\n        assert False\n"
+            "class TestChild(Base):\n    pass\n"
+        )
+    (project.path / "registry.py").write_text(
+        "registered = False\ndef register():\n    global registered\n"
+        "    if registered: raise RuntimeError('duplicate registration')\n    registered = True\n"
+    )
+    git(project, "add", "--intent-to-add", "client/test_same.py", "server/test_same.py")
+    patch = git(project, "diff", revision, "--", "source.py", "client/test_same.py", "server/test_same.py")
+    (project.path / "changes.diff").write_text(patch + "\n")
+    coverage = (project.path / ".coverage").read_bytes()
+    command = [
+        sys.executable,
+        "-m",
+        "skippy_cov",
+        "--diff",
+        "changes.diff",
+        "--base-ref",
+        revision,
+        "--granularity",
+        "test",
+        "--format",
+        "json",
+        "--pytest-arg=--import-mode=importlib",
+        "--collect-group",
+        "test_helpers.py",
+        "client",
+        "--collect-group",
+        "test_external.py",
+        "server",
+    ]
+    result = subprocess.run(command, cwd=project.path, text=True, capture_output=True, check=True)
+    assert json.loads(result.stdout) == {
+        "test_helpers.py": ["test_price"],
+        "test_external.py": ["test_external"],
+        "client/test_same.py": ["TestChild::test_inherited[1]", "TestChild::test_inherited[2]"],
+        "server/test_same.py": ["TestChild::test_inherited[1]", "TestChild::test_inherited[2]"],
+    }
+    assert (project.path / ".coverage").read_bytes() == coverage
+    (project.path / "server" / "test_same.py").write_text("raise RuntimeError('broken group')\n")
+    result = subprocess.run(command, cwd=project.path, text=True, capture_output=True, check=False)
+    assert result.returncode != 0
+    assert not result.stdout
+    assert "broken group" in result.stderr
+
+
+def test_cli_explicit_import_mode_handles_duplicate_module_names(pytester):
+    pytester.makeini("[pytest]\naddopts = --import-mode=importlib\n")
+    for name in ("one", "two"):
+        directory = pytester.path / name
+        directory.mkdir()
+        (directory / "test_same.py").write_text("def test_example():\n    assert False\n")
+    tests = collect_current_tests([Path("one"), Path("two")], ["--import-mode=importlib"])
+    assert {test.path.as_posix() for test in tests} == {"one/test_same.py", "two/test_same.py"}
+
+
 @pytest.mark.parametrize(
     ("original", "updated", "message"),
     [

@@ -1,7 +1,18 @@
 import json
 from types import FunctionType, SimpleNamespace
 
+import pytest
+
+from skippy_cov.__main__ import main
 from skippy_cov.collect import Collector
+
+
+@pytest.mark.parametrize("option", [["--collect-group", "tests"], ["--pytest-arg=--import-mode=importlib"]])
+def test_collection_options_require_test_granularity(option, capsys):
+    with pytest.raises(SystemExit) as error:
+        main(option)
+    assert error.value.code == 2
+    assert "--collect-group and --pytest-arg require --granularity test" in capsys.readouterr().err
 
 
 def test_custom_and_generated_items_round_trip_without_source_definitions(tmp_path, monkeypatch):
