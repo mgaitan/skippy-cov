@@ -102,7 +102,7 @@ def test_missing_coverage_preserves_original_selection(baseline_project, change_
 def test_legacy_test_body_change_runs_whole_module(baseline_project, change_file):
     source = (baseline_project.path / "legacy.py").read_text().replace("price() == 1", "price() == 99")
     change_file("legacy.py", source)
-    run_skippy(baseline_project).assert_outcomes(failed=1, passed=1)
+    run_skippy(baseline_project).assert_outcomes(failed=1, passed=2)
 
 
 def test_changed_shared_setup_preserves_original_selection(baseline_project, change_file):
@@ -110,6 +110,31 @@ def test_changed_shared_setup_preserves_original_selection(baseline_project, cha
     change_file("legacy.py", source + "\n    def setUp(self):\n        self.currency = 'ARS'\n")
     result = run_skippy(baseline_project)
     result.assert_outcomes(passed=3)
+    assert "running the original test selection" in result.stdout.str() + result.stderr.str()
+
+
+@pytest.mark.parametrize("original", ["def price():\n    return 1\n", "RATE = 1\ndef price():\n    return RATE\n"])
+def test_source_used_by_session_fixture_preserves_all_consumers(baseline_project, change_file, original):
+    baseline_project.makepyfile(
+        source=original,
+        test_first="def test_first(shared_price):\n    assert shared_price >= 1\n",
+        test_second="def test_second(shared_price):\n    assert shared_price == 1\n",
+    )
+    baseline_project.makeconftest(
+        "import pytest\nfrom source import price\n"
+        "@pytest.fixture(scope='session')\ndef shared_price():\n    return price()\n"
+    )
+    targets = ("test_first.py", "test_second.py")
+    baseline_project.runpytest_subprocess(
+        *targets, "--cov=source", "--cov-context=test", "--cov-report="
+    ).assert_outcomes(passed=2)
+    change_file("source.py", original.replace("1", "2"))
+
+    baseline_project.runpytest_subprocess(*targets).assert_outcomes(passed=1, failed=1)
+    result = run_skippy(baseline_project, *targets)
+
+    result.assert_outcomes(passed=1, failed=1)
+    assert result.ret == 1
     assert "running the original test selection" in result.stdout.str() + result.stderr.str()
 
 
