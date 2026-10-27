@@ -201,9 +201,11 @@ class CoverageMap:
                 contexts[line].extend(line_contexts)
         return dict(contexts)
 
-    def get_tests(self, filepath: Path) -> list[FileTestCandidate]:
+    def get_tests(self, filepath: Path, *, lines: set[int] | None = None) -> list[FileTestCandidate]:
         found_tests: defaultdict[Path, set[str]] = defaultdict(set)
-        for line_tests in self.contexts_by_lineno(filepath).values():
+        for line, line_tests in self.contexts_by_lineno(filepath).items():
+            if lines is not None and line not in lines:
+                continue
             for test in line_tests:
                 if test:
                     src, test = _fix_test_name(test)

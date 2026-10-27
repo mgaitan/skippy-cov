@@ -9,7 +9,8 @@ from pathlib import Path
 from unidiff import PatchedFile
 
 from skippy_cov.diff_handler import DiffHandler
-from skippy_cov.utils import CoverageMap, FileTestCandidate, is_test_file
+from skippy_cov.scopes import Granularity, ScopeSelectionError, select_scope_consumers
+from skippy_cov.utils import CoverageMap, FileTestCandidate, is_test_file, merge_candidates
 
 __version__ = version("skippy-cov")
 
@@ -128,9 +129,34 @@ def validate_function_changes(
                 raise SelectionError(message)
 
 
-def select_tests_to_run(diff_handler: DiffHandler, coverage_map: CoverageMap) -> list[FileTestCandidate]:
-    """Select test modules, refusing changes with unknown or shared dependencies."""
-    selected_modules: set[Path] = set()
+def select_source_modules(file_path: Path, patch: PatchedFile, coverage_map: CoverageMap) -> list[FileTestCandidate]:
+    contexts = coverage_map.contexts_by_lineno(file_path)
+    candidates = coverage_map.get_tests(file_path)
+    try:
+        validate_function_changes(file_path, patch, contexts, tests_only=False)
+    except SelectionError as error:
+        # A cached fixture's context only names the test that created it,
+        # not every test that later reused its result.
+        if any(
+            context.endswith(("|setup", "|teardown"))
+            for line_contexts in contexts.values()
+            for context in line_contexts
+        ):
+            message = f"Cannot determine all shared-fixture consumers of {file_path}"
+            raise SelectionError(message) from error
+        if not candidates:
+            raise
+    if not candidates:
+        message = f"No test contexts cover {file_path}"
+        raise SelectionError(message)
+    return [FileTestCandidate(candidate.path, set()) for candidate in candidates]
+
+
+def select_tests_to_run(
+    diff_handler: DiffHandler, coverage_map: CoverageMap, *, granularity: Granularity = Granularity.module
+) -> list[FileTestCandidate]:
+    """Select impact consumers and changed tests, refusing unknown shared dependencies."""
+    selected_tests: list[FileTestCandidate] = []
     known_tests = {
         coverage_map._relative_path(context.rsplit("|", 1)[0].split("::", 1)[0])
         for context in coverage_map.db.measured_contexts()
@@ -138,46 +164,34 @@ def select_tests_to_run(diff_handler: DiffHandler, coverage_map: CoverageMap) ->
     }
     for file_path in sorted(diff_handler.changed_files):
         patch = diff_handler.patches[file_path]
+        is_test_module = file_path in known_tests or (granularity == Granularity.test and is_test_file(file_path))
         if (
             file_path.suffix != ".py"
             or file_path.name in {"conftest.py", "__init__.py"}
             or not file_path.is_file()
-            or patch.is_added_file
+            or (patch.is_added_file and not (granularity == Granularity.test and is_test_module))
             or patch.is_removed_file
             or patch.is_rename
             or not patch
         ):
             message = f"Cannot determine test impact for {file_path}; run the original test selection"
             raise SelectionError(message)
-        is_test_module = file_path in known_tests
-        contexts = coverage_map.contexts_by_lineno(file_path)
-        candidates = coverage_map.get_tests(file_path)
         if is_test_module:
-            validate_function_changes(file_path, patch, contexts, tests_only=True)
-            selected_modules.add(file_path)
-        else:
+            if not patch.is_added_file:
+                validate_function_changes(file_path, patch, coverage_map.contexts_by_lineno(file_path), tests_only=True)
+            selected_tests.append(FileTestCandidate(file_path, set()))
+            selected_tests.extend(
+                FileTestCandidate(candidate.path, set()) for candidate in coverage_map.get_tests(file_path)
+            )
+        elif granularity == Granularity.test:
             try:
-                validate_function_changes(file_path, patch, contexts, tests_only=False)
-            except SelectionError as error:
-                # A cached fixture's context only names the test that created it,
-                # not every test that later reused its result.
-                if any(
-                    context.endswith(("|setup", "|teardown"))
-                    for line_contexts in contexts.values()
-                    for context in line_contexts
-                ):
-                    message = f"Cannot determine all shared-fixture consumers of {file_path}"
-                    raise SelectionError(message) from error
-                if not candidates:
-                    raise
-                selected_modules.update(candidate.path for candidate in candidates)
-                continue
-        if not is_test_module and not candidates:
-            message = f"No test contexts cover {file_path}"
-            raise SelectionError(message)
-        selected_modules.update(candidate.path for candidate in candidates)
-    for test_path in selected_modules:
+                selected_tests.extend(select_scope_consumers(diff_handler, file_path, coverage_map))
+            except ScopeSelectionError as error:
+                raise SelectionError(str(error)) from error
+        else:
+            selected_tests.extend(select_source_modules(file_path, patch, coverage_map))
+    for test_path in {candidate.path for candidate in selected_tests}:
         if not test_path.is_file():
             message = f"Selected test module no longer exists: {test_path}"
             raise SelectionError(message)
-    return [FileTestCandidate(path, set()) for path in sorted(selected_modules)]
+    return merge_candidates(selected_tests)

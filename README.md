@@ -124,9 +124,58 @@ On Python 3.14+, coverage defaults to
 
 ### Conservative selection and fallback
 
-Selection runs whole test modules. Pytest discovers unittest classes, inherited
+By default, selection runs whole test modules. Pytest discovers unittest classes, inherited
 methods, custom function names and parameterizations; skippy-cov does not rebuild
 their node IDs with a separate AST visitor.
+
+### Individual test selection (opt-in)
+
+The default `module` granularity is unchanged. To select individual tests, use:
+
+```bash
+pytest --skippy-cov --skippy-cov-diff=BASELINE_SHA..HEAD --skippy-cov-granularity=test
+skippy-cov --diff BASELINE_SHA..HEAD --granularity test --format json
+```
+
+The coverage database **must have been collected at `BASELINE_SHA`**, with
+`--cov-context=test`. Its revision cannot be inferred from a coverage database
+alone; providing coverage from a different commit can produce an incorrect
+selection. A single Git ref uses its merge base with HEAD, while an explicit
+`BASELINE_SHA..HEAD` range uses that exact baseline. The new revision must be
+HEAD. With a patch file, provide `--base-ref BASELINE_SHA` to the CLI or
+`--skippy-cov-base-ref=BASELINE_SHA` to pytest so the old source is available.
+
+This mode parses function, async-function, method, nested-function, and class
+ranges from the old source without executing it. A function-body change selects
+the tests recorded anywhere in that function's baseline runtime body, including
+consumers in other test files. It uses old line numbers for coverage, so shifted
+definitions and insertions into previously uncovered branches remain eligible.
+Unrelated sibling functions and methods do not share a selection.
+
+**Every new test is included independently of coverage and source impact.**
+Changed test modules run in full, including new functions, inherited methods,
+and new parameter cases. The plugin keeps pytest's original collection and then
+deselects unaffected tests, respecting requested paths, exact node IDs, `-k`,
+and `-m`. For an affected parameterized test it runs all currently collected
+cases within that original scope. The CLI resolves current IDs through an
+isolated pytest collection; pytest must be installed for this mode. It keeps
+stdout suitable for the selected output format and protects the baseline
+coverage database during collection. Test paths/discovery configuration apply;
+the CLI's collection clears execution `addopts` and `PYTEST_ADDOPTS`. Apply
+execution filters to the eventual pytest invocation, or use the plugin to keep
+the full original pytest argument semantics.
+
+New standalone functions, signature/decorator changes, class attributes/bases,
+module declarations, and ambiguous scope matches widen to the recorded file
+consumers as whole modules, with a diagnostic. If those consumers are unknown,
+or the affected scope/file involves shared setup/teardown, the plugin preserves
+the original selection and the CLI reports that it cannot select safely. New
+source files and non-Python changes retain that full-selection fallback.
+The test suite compares individual, module, and full runs with real coverage,
+including a shared-session-fixture regression where narrowing could hide a
+failing second consumer. Historical coverage remains an impact heuristic.
+
+### Module selection rules
 
 Changes to existing source function bodies with recorded execution under a
 test's `run` phase select the consuming test modules. If a source diff also
