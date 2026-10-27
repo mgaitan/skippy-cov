@@ -8,21 +8,11 @@ from pathlib import Path
 from unidiff import PatchedFile
 
 from skippy_cov.diff_handler import DiffHandler
-from skippy_cov.scopes import Granularity, ScopeSelectionError, code_lines, select_scope_consumers
-from skippy_cov.utils import CoverageMap, FileTestCandidate, is_test_file, merge_candidates
+from skippy_cov.scopes import Granularity, code_lines, select_scope_consumers
+from skippy_cov.scopes import ScopeSelectionError as SelectionError
+from skippy_cov.utils import CoverageMap, FileTestCandidate, merge_candidates
 
 __version__ = version("skippy-cov")
-
-
-class SelectionError(ValueError):
-    """The diff has dependencies that historical coverage cannot identify."""
-
-
-def discover_tests_in_file(file_path: Path) -> FileTestCandidate | None:
-    """Select a whole test module and leave discovery to pytest."""
-    if is_test_file(file_path) and file_path.is_file():
-        return FileTestCandidate(file_path, set())
-    return None
 
 
 def function_body_lines(file_path: Path) -> set[int]:
@@ -137,10 +127,7 @@ def select_tests_to_run(
                 FileTestCandidate(candidate.path, set()) for candidate in coverage_map.get_tests(file_path)
             )
         elif granularity == Granularity.test:
-            try:
-                selected_tests.extend(select_scope_consumers(diff_handler, file_path, coverage_map))
-            except ScopeSelectionError as error:
-                raise SelectionError(str(error)) from error
+            selected_tests.extend(select_scope_consumers(diff_handler, file_path, coverage_map))
         else:
             selected_tests.extend(select_source_modules(file_path, patch, coverage_map))
     for test_path in {candidate.path for candidate in selected_tests}:

@@ -4,15 +4,10 @@ import subprocess
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from pathlib import Path
 
 import coverage
 from coverage.exceptions import CoverageException
-
-from skippy_cov.config_handler import get_config
-
-DEFAULT_GLOB_PATTERNS = ("test_*.py", "*_test.py")
 
 
 class FilterCandidatesError(ValueError):
@@ -25,11 +20,6 @@ class FilterCandidatesError(ValueError):
 class FileTestCandidate:
     path: Path
     tests: set[str]
-
-    def __lt__(self, other: object) -> bool:
-        if not isinstance(other, FileTestCandidate):
-            raise NotImplementedError
-        return self.path < other.path
 
     def as_set(self) -> set[str]:
         if not self.tests:
@@ -56,27 +46,6 @@ def select_collected_tests(tests: list[CollectedTest], candidates: list[FileTest
         for test in tests
         if test.path in modules or test.definition in modules or (test.path, test.name.split("[", 1)[0]) in identities
     ]
-
-
-def is_test_file(file_path: Path) -> bool:
-    """
-    Checks if a file is a test file based on its name.
-
-    Checks if a config file is present. If so, tries to use the `python_files` key
-    from the config file.
-    Otherwise uses the default glob pattern. (test_*.py)
-    """
-
-    # TODO: consider pytest flags such as `ignore`, `addopts`, etc...
-    # config_handler.ConfigHandler should already handle it,
-    #   but I want to have something working before sinking more hours into this
-    # SEE: https://docs.pytest.org/en/stable/example/pythoncollection.html#changing-naming-conventions
-    patterns = get_config().get_value("python_files")
-    if isinstance(patterns, str):
-        patterns = patterns.split()
-    if not isinstance(patterns, (list, tuple)):
-        patterns = DEFAULT_GLOB_PATTERNS
-    return any(fnmatch(file_path.name, pattern) for pattern in patterns if isinstance(pattern, str))
 
 
 def _fix_test_name(test_name: str) -> tuple[str, str]:
