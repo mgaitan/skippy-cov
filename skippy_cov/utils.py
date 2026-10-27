@@ -45,6 +45,24 @@ class FileTestCandidate:
         return tests
 
 
+@dataclass
+class CollectedTest:
+    path: Path
+    name: str
+    definition: Path | None = None
+
+
+def select_collected_tests(tests: list[CollectedTest], candidates: list[FileTestCandidate]) -> list[CollectedTest]:
+    """Match actual pytest identities, keeping inherited definitions and current parameter cases."""
+    modules = {candidate.path for candidate in candidates if not candidate.tests}
+    identities = {(candidate.path, test.split("[", 1)[0]) for candidate in candidates for test in candidate.tests}
+    return [
+        test
+        for test in tests
+        if test.path in modules or test.definition in modules or (test.path, test.name.split("[", 1)[0]) in identities
+    ]
+
+
 def is_test_file(file_path: Path) -> bool:
     """
     Checks if a file is a test file based on its name.
@@ -166,6 +184,8 @@ class CoverageMap:
             message = f"Invalid coverage data or pytest context in {filepath}: {error}"
             raise CoverageMapError(message) from error
         self.filenames: dict[Path, list[str]] = defaultdict(list)
+        self.test_files = {self._relative_path(_fix_test_name(context)[0]) for context in contexts if context}
+        self._contexts: dict[Path, dict[int, list[str]]] = {}
         for filename in self.db.measured_files():
             self.filenames[self._relative_path(filename)].append(filename)
 
@@ -192,6 +212,8 @@ class CoverageMap:
 
     def contexts_by_lineno(self, filepath: Path) -> dict[int, list[str]]:
         relative_path = filepath.relative_to(self.root) if filepath.is_absolute() else filepath
+        if relative_path in self._contexts:
+            return self._contexts[relative_path]
         filenames = self.filenames.get(relative_path)
         if filenames is None:
             return {}
@@ -199,7 +221,8 @@ class CoverageMap:
         for filename in filenames:
             for line, line_contexts in self.db.contexts_by_lineno(filename).items():
                 contexts[line].extend(line_contexts)
-        return dict(contexts)
+        self._contexts[relative_path] = dict(contexts)
+        return self._contexts[relative_path]
 
     def get_tests(self, filepath: Path, *, lines: set[int] | None = None) -> list[FileTestCandidate]:
         found_tests: defaultdict[Path, set[str]] = defaultdict(set)

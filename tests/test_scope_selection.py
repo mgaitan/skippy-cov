@@ -347,3 +347,40 @@ def test_new_inherited_tests_are_always_included(scope_project, cli):
         result.assert_outcomes(failed=2, passed=4)
     else:
         run_scope(project, revision).assert_outcomes(failed=2, passed=4, deselected=2)
+
+
+@pytest.mark.parametrize("cli", [False, True], ids=["plugin", "cli"])
+def test_broad_python_files_does_not_misclassify_source_as_tests(scope_project, cli):
+    project, _ = scope_project
+    project.makeini("[pytest]\npython_files = *.py\n")
+    revision = baseline(project, passed=6)
+    change_price(project)
+    patch = prepare_diff(project, revision)
+    if cli:
+        selected = run(
+            patch, project.path / ".coverage", None, True, granularity=Granularity.test, base_ref=revision, collect=True
+        )
+        assert selected == {
+            "legacy.py::PriceCase::test_price",
+            "test_helpers.py::test_price",
+            "test_external.py::test_external",
+        }
+    else:
+        result = run_scope(project, revision)
+        result.assert_outcomes(failed=2, passed=1, deselected=3)
+        assert "running the original test selection" not in result.stdout.str() + result.stderr.str()
+
+
+@pytest.mark.parametrize("kind", ["source", "test"])
+def test_new_files_with_broad_patterns_are_classified_by_pytest(scope_project, kind):
+    project, _ = scope_project
+    project.makeini("[pytest]\npython_files = *.py\n")
+    revision = baseline(project, passed=6)
+    if kind == "source":
+        project.makepyfile(new_helpers="def new_helper():\n    return 1\n")
+        result = run_scope(project, revision)
+        result.assert_outcomes(passed=6)
+        assert "running the original test selection" in result.stdout.str() + result.stderr.str()
+    else:
+        project.makepyfile(extra_checks="def test_new():\n    assert False\n")
+        run_scope(project, revision).assert_outcomes(failed=1, deselected=6)

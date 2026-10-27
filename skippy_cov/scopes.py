@@ -5,16 +5,14 @@ from __future__ import annotations
 import ast
 import copy
 import io
-import logging
 import tokenize
+import warnings
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 from skippy_cov.diff_handler import DiffHandler
 from skippy_cov.utils import CoverageMap, FileTestCandidate
-
-logger = logging.getLogger(__name__)
 
 
 class Granularity(StrEnum):
@@ -160,7 +158,7 @@ def select_scope_consumers(diff: DiffHandler, path: Path, coverage_map: Coverage
         if not candidates:
             message = f"No test contexts cover {path}"
             raise ScopeSelectionError(message) from error
-        logger.warning("skippy-cov: %s; selecting all recorded file consumers of %s", error, path)
+        warnings.warn(f"skippy-cov: {error}; selecting all recorded file consumers of {path}", stacklevel=2)
         return [FileTestCandidate(candidate.path, set()) for candidate in candidates]
     return (
         [

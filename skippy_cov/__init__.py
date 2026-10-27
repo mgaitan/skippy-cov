@@ -153,18 +153,18 @@ def select_source_modules(file_path: Path, patch: PatchedFile, coverage_map: Cov
 
 
 def select_tests_to_run(
-    diff_handler: DiffHandler, coverage_map: CoverageMap, *, granularity: Granularity = Granularity.module
+    diff_handler: DiffHandler,
+    coverage_map: CoverageMap,
+    *,
+    granularity: Granularity = Granularity.module,
+    test_files: set[Path] | None = None,
 ) -> list[FileTestCandidate]:
     """Select impact consumers and changed tests, refusing unknown shared dependencies."""
     selected_tests: list[FileTestCandidate] = []
-    known_tests = {
-        coverage_map._relative_path(context.rsplit("|", 1)[0].split("::", 1)[0])
-        for context in coverage_map.db.measured_contexts()
-        if context
-    }
+    known_tests = coverage_map.test_files | (test_files or set())
     for file_path in sorted(diff_handler.changed_files):
         patch = diff_handler.patches[file_path]
-        is_test_module = file_path in known_tests or (granularity == Granularity.test and is_test_file(file_path))
+        is_test_module = file_path in known_tests
         if (
             file_path.suffix != ".py"
             or file_path.name in {"conftest.py", "__init__.py"}

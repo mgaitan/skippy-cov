@@ -12,7 +12,14 @@ from pathlib import Path
 from skippy_cov import __version__, select_tests_to_run
 from skippy_cov.diff_handler import DiffHandler, DiffHandlerError
 from skippy_cov.scopes import Granularity
-from skippy_cov.utils import CoverageMap, FileTestCandidate, filter_by_path, merge_candidates
+from skippy_cov.utils import (
+    CollectedTest,
+    CoverageMap,
+    FileTestCandidate,
+    filter_by_path,
+    merge_candidates,
+    select_collected_tests,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +30,13 @@ class Format(StrEnum):
     lines = "lines"
 
 
-def collect_current_tests(candidates: list[FileTestCandidate], scopes: list[Path] | None) -> list[FileTestCandidate]:
+def collect_current_tests(scopes: list[Path] | None) -> list[CollectedTest]:
     """Let pytest resolve inheritance, custom discovery, and parameter IDs for the CLI."""
     with tempfile.TemporaryDirectory(prefix="skippy-collection-") as directory:
         root = Path(directory)
-        plan, output = root / "plan.json", root / "targets.json"
-        plan.write_text(json.dumps(sorted(target for candidate in candidates for target in candidate.as_set())))
+        output = root / "tests.json"
         result = subprocess.run(
-            [sys.executable, "-m", "skippy_cov.collect", str(plan), str(output), *map(str, scopes or [])],
+            [sys.executable, "-m", "skippy_cov.collect", str(output), *map(str, scopes or [])],
             capture_output=True,
             text=True,
             env=os.environ | {"COVERAGE_FILE": str(root / ".coverage"), "PYTEST_ADDOPTS": ""},
@@ -39,11 +45,11 @@ def collect_current_tests(candidates: list[FileTestCandidate], scopes: list[Path
         if result.returncode not in {0, 5} or not output.is_file():
             message = f"Cannot resolve current pytest collection: {result.stdout}\n{result.stderr}"
             raise ValueError(message)
-        targets = json.loads(output.read_text())
-    return merge_candidates(
-        FileTestCandidate(Path(filename), {test} if separator else set())
-        for filename, separator, test in (target.partition("::") for target in targets)
-    )
+        tests = json.loads(output.read_text())
+    return [
+        CollectedTest(Path(test["path"]), test["name"], Path(test["definition"]) if test["definition"] else None)
+        for test in tests
+    ]
 
 
 def run(
@@ -62,9 +68,14 @@ def run(
     """Select tests and optionally print deterministic CLI output."""
     diff_handler = DiffHandler(diff, base_ref=base_ref)
     coverage_map = CoverageMap(coverage_file, source_root=source_root)
-    selected_tests = select_tests_to_run(diff_handler, coverage_map, granularity=granularity)
+    discovered = collect_current_tests(relative_to) if collect else []
+    test_files = {test.path for test in discovered} | {test.definition for test in discovered if test.definition}
+    selected_tests = select_tests_to_run(diff_handler, coverage_map, granularity=granularity, test_files=test_files)
     if collect:
-        selected_tests = collect_current_tests(selected_tests, relative_to)
+        selected_tests = [
+            FileTestCandidate(test.path, {test.name} if test.name else set())
+            for test in select_collected_tests(discovered, selected_tests)
+        ]
     if relative_to:
         selected_tests = filter_by_path(selected_tests, relative_to, keep_prefix)
     selected_tests = merge_candidates(selected_tests)
