@@ -107,10 +107,12 @@ ignore = [
 
 [tool.coverage.report]
 skip_empty = true
+fail_under = 100
 
 [tool.coverage.run]
 branch = true
 core = "ctrace"
+patch = ["subprocess"]
 source = ["skippy_cov"]
 
 [project.entry-points.pytest11]

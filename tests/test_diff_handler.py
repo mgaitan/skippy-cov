@@ -76,3 +76,22 @@ def test_invalid_hunk(invalid_hunk: str) -> None:
 def test_nonempty_unrecognized_patch_is_not_an_empty_diff():
     with pytest.raises(DiffHandlerError, match="No supported patch"):
         DiffHandler("not a diff")
+
+
+@pytest.mark.parametrize("filename", ["a/source.py", "source.py"])
+def test_deleted_files_keep_the_source_path(filename):
+    diff = f"--- {filename}\n+++ /dev/null\n@@ -1 +0,0 @@\n-RATE = 1\n"
+    handler = DiffHandler(diff)
+    assert handler.changed_files == {Path("source.py")}
+    assert handler.patches[Path("source.py")].is_removed_file
+
+
+def test_unprefixed_target_path_is_not_truncated():
+    handler = DiffHandler("--- source.py\n+++ source.py\n@@ -1 +1 @@\n-RATE = 1\n+RATE = 2\n")
+    assert handler.changed_files == {Path("source.py")}
+
+
+def test_missing_baseline_source_reports_a_selection_error(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(DiffHandlerError, match="Cannot read baseline source"):
+        DiffHandler("", base_ref="HEAD").base_source(Path("missing.py"))

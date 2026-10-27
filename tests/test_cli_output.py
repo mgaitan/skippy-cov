@@ -55,3 +55,26 @@ def test_path_filter_does_not_mutate_candidates_or_duplicate_overlapping_scopes(
     assert filtered[0].path == Path("server/test_price.py")
     assert candidate.path == Path("/tests/server/test_price.py")
     assert filter_by_path([candidate], [Path("/tests"), Path("/tests/server")]) == [candidate]
+
+
+def test_cli_path_scope_is_applied_before_rendering(coverage_file, mocker, capsys):
+    baseline = coverage_file({"source.py": {"tests/test_price.py::test_price|run": {2}}})
+    mocker.patch(
+        "skippy_cov.__main__.select_tests_to_run",
+        return_value=[
+            FileTestCandidate(Path("tests/test_price.py"), set()),
+            FileTestCandidate(Path("other.py"), set()),
+        ],
+    )
+    assert run("", baseline, [Path("tests")], False, Format.lines, display=True) == {"test_price.py"}
+    assert capsys.readouterr().out == "test_price.py\n"
+
+
+def test_file_level_custom_pytest_item_preserves_module_target(coverage_file, mocker):
+    from skippy_cov.utils import CollectedTest
+
+    path = Path("tests/test_custom.py")
+    baseline = coverage_file({"source.py": {"tests/test_source.py::test_source|run": {2}}})
+    mocker.patch("skippy_cov.__main__.collect_current_tests", return_value=[CollectedTest(path, "")])
+    mocker.patch("skippy_cov.__main__.select_tests_to_run", return_value=[FileTestCandidate(path, set())])
+    assert run("", baseline, None, True, collect=True) == {"tests/test_custom.py"}

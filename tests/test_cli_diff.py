@@ -160,3 +160,12 @@ def test_diff_default_branch(tmp_path, dummy_coverage_file, capsys):
     out = capsys.readouterr()
     assert code == 0, out
     assert "skippy-cov:" not in out.err
+
+
+def test_debug_option_keeps_machine_readable_output(dummy_diff_file, dummy_coverage_file, capsys):
+    main(
+        ["--diff", str(dummy_diff_file[0]), "--coverage-file", str(dummy_coverage_file), "--debug", "--format", "json"]
+    )
+    import json
+
+    assert json.loads(capsys.readouterr().out) == {"tests/test_source.py": []}

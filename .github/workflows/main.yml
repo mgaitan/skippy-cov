@@ -28,7 +28,8 @@ jobs:
       - run: uv lock --check
       - run: uv run --only-group lint ruff check --output-format=github
       - run: uv run --only-group lint ruff format --check
-      - run: uv run --group qa ty check skippy_cov --output-format=github
+      - name: Typecheck production code with ty
+        run: uv run --group qa ty check skippy_cov --output-format=github
 
   tests:
     runs-on: ubuntu-latest

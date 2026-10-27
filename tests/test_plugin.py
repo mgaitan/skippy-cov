@@ -182,3 +182,10 @@ def test_invalid_diff_keeps_original_selection(baseline_project):
     )
     result.assert_outcomes(passed=3)
     assert "running the original test selection" in result.stdout.str() + result.stderr.str()
+
+
+def test_deprecated_strip_prefix_warns_and_preserves_scope(baseline_project, change_file):
+    change_file()
+    result = run_skippy(baseline_project, "--skippy-cov-strip-prefix", "legacy.py::PriceCase::test_price")
+    result.assert_outcomes(failed=1)
+    assert "--skippy-cov-strip-prefix is deprecated" in result.stdout.str() + result.stderr.str()
