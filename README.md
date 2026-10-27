@@ -266,14 +266,14 @@ and save the baseline directory in the full workflow:
 
 Save only on pushes to the target branch; the action also verifies that the
 whole workflow ultimately succeeded. Configure the PR job with `actions: read`
-and `contents: read`, a checkout with sufficient history and the target ref,
+and `contents: read`, a checkout with an `origin` remote,
 and the project environment with pytest and a version of skippy-cov containing
 this action's collection options. For example:
 
 ```yaml
 - uses: actions/checkout@v4
   with:
-    fetch-depth: 0
+    fetch-depth: 1
 - id: skippy
   uses: mgaitan/skippy-cov/.github/actions/select@<release-tag>
   with:
@@ -281,6 +281,7 @@ this action's collection options. For example:
     base-branch: ${{ github.event.pull_request.base.ref }}
     workflow: .github/workflows/ci-full.yml
     cache-prefix: skippy-baseline-v1
+    history-depth: 100
     collection-groups: '[["tests/client"], ["tests/server"]]'
     pytest-args: '["--import-mode=importlib"]'
     # source-root: /original/container/checkout
@@ -289,6 +290,23 @@ this action's collection options. For example:
   env:
     REASON: ${{ steps.skippy.outputs.reason }}
 ```
+
+For shallow checkouts, the action performs one `git fetch --no-tags --depth=N`
+from `origin` for the checked-out HEAD and target commit, where `N` is
+`history-depth` (default `100`, a positive integer). Prefer the PR's exact base
+SHA as above; a target ref must otherwise be available locally or fetchable from
+`origin`. The fetched target is stored in `refs/skippy-cov/base`, without changing
+the checkout or local branches. Complete checkouts with an available target do
+not fetch. This bounds history depth per tip, not total transfer bytes (merge
+history and repository contents can still be large).
+
+The action never automatically deepens again or downloads the full history.
+It selects a cache only when Git proves its revision is an ancestor of **both**
+HEAD and the target in the available history. An older baseline beyond the
+shallow boundary, unrelated history, or a failed fetch yields `selected: false`
+and the full-suite fallback, never an assumed ancestry. Increase `history-depth`
+if baselines are commonly older; `fetch-depth: 0` remains an explicit option
+when full history is preferred.
 
 Use the exact same `baseline-path` when saving and restoring: GitHub cache
 versions include the path. The cache prefix must identify a compatible test

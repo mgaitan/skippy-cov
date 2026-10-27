@@ -2,7 +2,7 @@ name: Select tests with skippy-cov
 description: Restore a full-run coverage baseline and select impacted tests
 inputs:
   base-ref:
-    description: Git ref for the target branch (available in the checkout)
+    description: Target commit SHA or ref fetchable from origin (prefer the PR base SHA)
     required: true
   base-branch:
     description: Target branch name where successful full runs publish baselines
@@ -13,6 +13,9 @@ inputs:
   cache-prefix:
     description: Cache key prefix identifying the full test suite and environment
     required: true
+  history-depth:
+    description: Maximum fetched history depth per tip for shallow checkouts (no automatic unshallow)
+    default: '100'
   baseline-path:
     description: Directory saved in the cache, containing .coverage and sha.txt
     default: .skippy-baseline
@@ -48,6 +51,7 @@ runs:
       shell: bash
       env:
         BASE_REF: ${{ inputs.base-ref }}
+        HISTORY_DEPTH: ${{ inputs.history-depth }}
         BASE_BRANCH: ${{ inputs.base-branch }}
         WORKFLOW: ${{ inputs.workflow }}
         CACHE_PREFIX: ${{ inputs.cache-prefix }}

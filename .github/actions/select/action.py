@@ -18,6 +18,27 @@ def output(**values):
             stream.write(f"{key}<<{delimiter}\n{value}\n{delimiter}\n")
 
 
+def prepare_history(ref):
+    depth = int(os.environ.get("HISTORY_DEPTH", "100"))
+    if depth < 1:
+        raise ValueError("History depth must be a positive integer")
+    shallow = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"], text=True, capture_output=True, check=True
+    ).stdout.strip()
+    available = subprocess.run(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], text=True, capture_output=True)
+    if shallow == "true" or available.returncode:
+        head = subprocess.run(["git", "rev-parse", "HEAD"], text=True, capture_output=True, check=True).stdout.strip()
+        target = available.stdout.strip() if available.returncode == 0 else ref
+        subprocess.run(
+            ["git", "fetch", "--no-tags", f"--depth={depth}", "origin", head, f"+{target}:refs/skippy-cov/base"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return "refs/skippy-cov/base"
+    return ref
+
+
 def baseline():
     ref = os.environ["BASE_REF"]
     branch = os.environ["BASE_BRANCH"]
@@ -25,6 +46,7 @@ def baseline():
     prefix = os.environ["CACHE_PREFIX"]
     if not ref or ref.startswith("-") or not branch or not workflow or not prefix:
         raise ValueError("A valid base-ref, base-branch, workflow and cache-prefix are required")
+    ref = prepare_history(ref)
     repository = os.environ["GITHUB_REPOSITORY"]
     result = subprocess.run(
         [
@@ -68,11 +90,13 @@ def baseline():
             and metadata["head_branch"] == branch
             and metadata["event"] == "push"
             and metadata["conclusion"] == "success"
-            and metadata["path"] == workflow
+            and metadata["path"].split("@", 1)[0] == workflow
         ):
             output(baseline=revision, **{"cache-key": cache["key"]})
             return
-    raise ValueError("No eligible baseline from a successful full workflow")
+    raise ValueError(
+        "No eligible baseline from a successful full workflow with proven ancestry (history may be insufficient)"
+    )
 
 
 def select():

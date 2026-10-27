@@ -606,7 +606,9 @@ def test_github_action_validates_baseline_and_selects(scope_project, monkeypatch
     env["CACHE_HIT"] = "false"
     assert execute("select")["reason"] == "No exact coverage cache for the baseline revision"
     env["WORKFLOW"] = ".github/workflows/other.yml"
-    assert execute("baseline")["reason"] == "No eligible baseline from a successful full workflow"
+    assert execute("baseline")["reason"] == (
+        "No eligible baseline from a successful full workflow with proven ancestry (history may be insufficient)"
+    )
 
 
 @pytest.mark.parametrize(
