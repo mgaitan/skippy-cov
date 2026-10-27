@@ -31,11 +31,6 @@ class FileTestCandidate:
             raise NotImplementedError
         return self.path < other.path
 
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, FileTestCandidate):
-            raise NotImplementedError
-        return self.path == other.path and self.tests == other.tests
-
     def as_set(self) -> set[str]:
         if not self.tests:
             return {self.path.as_posix()}
