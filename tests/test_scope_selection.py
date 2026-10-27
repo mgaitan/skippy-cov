@@ -1,11 +1,12 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from skippy_cov import Granularity, SelectionError, select_tests_to_run
-from skippy_cov.__main__ import get_base_ref, run
+from skippy_cov.__main__ import collect_current_tests, get_base_ref, run
 from skippy_cov.diff_handler import DiffHandler, DiffHandlerError
 from skippy_cov.utils import CoverageMap
 
@@ -141,7 +142,7 @@ def test_fine_mode_respects_current_pytest_scopes(scope_project, targets):
 
 
 @pytest.mark.parametrize("change", ["new-helper", "class-attribute", "signature"])
-def test_structural_changes_explicitly_widen_to_file_consumers(scope_project, change):
+def test_structural_changes_keep_the_original_selection(scope_project, change):
     project, revision = scope_project
     path = project.path / "source.py"
     original = path.read_text()
@@ -154,8 +155,8 @@ def test_structural_changes_explicitly_widen_to_file_consumers(scope_project, ch
     path.write_text(updated)
 
     result = run_scope(project, revision)
-    assert "selecting all recorded file consumers" in result.stdout.str() + result.stderr.str()
-    assert result.parseoutcomes().get("deselected") == 1
+    assert "running the original test selection" in result.stdout.str() + result.stderr.str()
+    assert not result.parseoutcomes().get("deselected")
 
 
 def test_cli_test_granularity_emits_individual_json_targets(scope_project):
@@ -258,8 +259,8 @@ def test_new_parameter_case_in_a_known_test_module_runs_without_source_impact(sc
     path.write_text(path.read_text().replace("[1]", "[1, 2]"))
 
     result = run_scope(project, revision)
-    result.assert_outcomes(failed=1, passed=2, deselected=2)
-    assert "running the original test selection" not in result.stdout.str() + result.stderr.str()
+    result.assert_outcomes(failed=1, passed=4)
+    assert "running the original test selection" in result.stdout.str() + result.stderr.str()
 
 
 @pytest.mark.parametrize("structural", [False, True], ids=["body", "declaration"])
@@ -288,7 +289,7 @@ def test_session_fixture_failure_remains_visible_in_fine_mode(scope_project, str
 
     result = run_scope(project, revision)
     result.assert_outcomes(failed=1, passed=3)
-    assert "shared-fixture" in result.stdout.str() + result.stderr.str()
+    assert "running the original test selection" in result.stdout.str() + result.stderr.str()
 
 
 def test_mark_expression_is_preserved_in_fine_mode(scope_project):
@@ -384,3 +385,89 @@ def test_new_files_with_broad_patterns_are_classified_by_pytest(scope_project, k
     else:
         project.makepyfile(extra_checks="def test_new():\n    assert False\n")
         run_scope(project, revision).assert_outcomes(failed=1, deselected=6)
+
+
+@pytest.mark.parametrize("granularity", ["module", "test"])
+def test_constant_change_keeps_import_time_consumers(scope_project, granularity):
+    project, _ = scope_project
+    path = project.path / "source.py"
+    path.write_text("RATE = 1\n" + path.read_text())
+    project.makepyfile(test_imported="from source import RATE\ndef test_rate():\n    assert RATE == 1\n")
+    revision = baseline(project, passed=5)
+    path.write_text(path.read_text().replace("RATE = 1", "RATE = 2"))
+
+    result = run_scope(project, revision, granularity=granularity)
+    result.assert_outcomes(failed=1, passed=4)
+    patch = prepare_diff(project, revision)
+    with pytest.raises(SelectionError):
+        run(patch, project.path / ".coverage", None, True, granularity=Granularity(granularity), base_ref=revision)
+
+
+def test_cli_collection_respects_configured_testpaths(scope_project):
+    project, _ = scope_project
+    project.makeini("[pytest]\ntestpaths = selected\n")
+    directory = project.path / "selected"
+    directory.mkdir()
+    (directory / "test_selected.py").write_text(
+        "from source import price\ndef test_selected():\n    assert price() == 1\n"
+    )
+    project.makepyfile(test_outside="raise RuntimeError('outside configured testpaths')\n")
+
+    tests = collect_current_tests(None)
+    assert {test.path.as_posix() for test in tests} == {"selected/test_selected.py"}
+    assert {test.path.as_posix() for test in collect_current_tests([Path("test_other.py")])} == {"test_other.py"}
+
+
+@pytest.mark.parametrize("cli", [False, True], ids=["plugin", "cli"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from functools import lru_cache\n@lru_cache\ndef price():\n    return 1\n",
+        "from functools import lru_cache\nclass Quote:\n    @lru_cache\n    def price(self):\n        return 1\n"
+        "price = Quote().price\n",
+        "from functools import lru_cache\ndef cached(cls):\n    cls.price = lru_cache(cls.price)\n    return cls\n"
+        "@cached\nclass Quote:\n    def price(self):\n        return 1\nprice = Quote().price\n",
+    ],
+    ids=["function", "method", "class"],
+)
+def test_decorated_scopes_keep_cached_consumers(scope_project, cli, source):
+    project, _ = scope_project
+    project.makepyfile(
+        source=source,
+        test_helpers="from source import price\ndef test_first():\n    assert price() >= 1\n"
+        "def test_second():\n    assert price() == 1\n",
+        test_external="def test_external():\n    assert True\n",
+    )
+    path = project.path / "source.py"
+    path.write_text(path.read_text() + "\n")
+    revision = baseline(project)
+    change_price(project)
+    if cli:
+        patch = prepare_diff(project, revision)
+        with pytest.raises(SelectionError, match="Decorated scope"):
+            run(patch, project.path / ".coverage", None, True, granularity=Granularity.test, base_ref=revision)
+    else:
+        run_scope(project, revision).assert_outcomes(failed=1, passed=3)
+        project.runpytest_subprocess("--skippy-cov", "--skippy-cov-diff=changes.diff", ".").assert_outcomes(
+            failed=1, passed=1
+        )
+
+
+@pytest.mark.parametrize("granularity", ["module", "test"])
+@pytest.mark.parametrize("edit", ["replace", "delete"])
+def test_test_module_string_edits_are_not_treated_as_comments(scope_project, granularity, edit):
+    project, _ = scope_project
+    project.makepyfile(
+        test_data="DATA = '''first\n# value\nlast'''\ndef test_data():\n    assert True\n",
+        test_imported="from test_data import DATA\ndef test_data():\n    assert '# value' in DATA\n",
+    )
+    path = project.path / "test_data.py"
+    path.write_text(path.read_text() + "\n")
+    revision = baseline(project, passed=6)
+    path.write_text(
+        path.read_text().replace("# value", "# changed")
+        if edit == "replace"
+        else path.read_text().replace("# value\n", "")
+    )
+    result = run_scope(project, revision, granularity=granularity)
+    assert result.parseoutcomes().get("failed") == 1

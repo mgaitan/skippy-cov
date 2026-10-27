@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import re
 from importlib.metadata import version
 from itertools import groupby
 from pathlib import Path
@@ -9,7 +8,7 @@ from pathlib import Path
 from unidiff import PatchedFile
 
 from skippy_cov.diff_handler import DiffHandler
-from skippy_cov.scopes import Granularity, ScopeSelectionError, select_scope_consumers
+from skippy_cov.scopes import Granularity, ScopeSelectionError, code_lines, select_scope_consumers
 from skippy_cov.utils import CoverageMap, FileTestCandidate, is_test_file, merge_candidates
 
 __version__ = version("skippy-cov")
@@ -65,16 +64,6 @@ def test_function_lines(file_path: Path) -> set[int]:
     return lines
 
 
-def is_safe_test_deletion(line: str) -> bool:
-    line = line.lstrip()
-    return (
-        not line.strip()
-        or line.startswith("#")
-        or re.match(r"def\s+test\w*\s*\(", line) is not None
-        or re.match(r"@pytest\.mark\.parametrize\s*\(", line) is not None
-    )
-
-
 def validate_function_changes(
     file_path: Path,
     patch: PatchedFile,
@@ -83,8 +72,9 @@ def validate_function_changes(
     tests_only: bool,
 ) -> None:
     eligible_lines = test_function_lines(file_path) if tests_only else function_body_lines(file_path)
+    executable_lines = code_lines(file_path.read_bytes()) if tests_only else set()
     for hunk in patch:
-        for is_context, block in groupby(hunk, key=lambda line: line.is_context):
+        for is_context, block in groupby(hunk, key=lambda line: not (line.is_added or line.is_removed)):
             if is_context:
                 continue
             changes = list(block)
@@ -92,37 +82,13 @@ def validate_function_changes(
             removed_lines = {
                 line.source_line_no for line in changes if line.is_removed and line.source_line_no is not None
             }
-            removed_values = {
-                line.source_line_no: line.value
-                for line in changes
-                if line.is_removed and line.source_line_no is not None
-            }
-            added_values = {
-                line.target_line_no: line.value for line in changes if line.is_added and line.target_line_no is not None
-            }
-            invalid_test_deletion = tests_only and any(
-                not is_safe_test_deletion(removed_values[line]) and not contexts.get(line) for line in removed_lines
-            )
-            if (
-                (not added_lines and not removed_lines)
-                or (not tests_only and (not added_lines or not removed_lines or not added_lines <= eligible_lines))
-                or (
-                    tests_only
-                    and any(
-                        line not in eligible_lines and not is_safe_test_deletion(added_values[line])
-                        for line in added_lines
-                    )
-                )
-                or invalid_test_deletion
+            if (not tests_only and (not added_lines or not removed_lines or not added_lines <= eligible_lines)) or (
+                tests_only and not (added_lines & executable_lines) <= eligible_lines
             ):
                 message = f"Changed imports, declarations or untracked code in {file_path}"
                 raise SelectionError(message)
             if any(
-                (not tests_only and not contexts.get(line))
-                or (
-                    not (tests_only and is_safe_test_deletion(removed_values[line]))
-                    and any(not context.endswith("|run") for context in contexts.get(line, []))
-                )
+                not contexts.get(line) or any(not context.endswith("|run") for context in contexts[line])
                 for line in removed_lines
             ):
                 message = f"Changed lines in {file_path} have import-time, shared-fixture or unknown coverage"
@@ -132,20 +98,7 @@ def validate_function_changes(
 def select_source_modules(file_path: Path, patch: PatchedFile, coverage_map: CoverageMap) -> list[FileTestCandidate]:
     contexts = coverage_map.contexts_by_lineno(file_path)
     candidates = coverage_map.get_tests(file_path)
-    try:
-        validate_function_changes(file_path, patch, contexts, tests_only=False)
-    except SelectionError as error:
-        # A cached fixture's context only names the test that created it,
-        # not every test that later reused its result.
-        if any(
-            context.endswith(("|setup", "|teardown"))
-            for line_contexts in contexts.values()
-            for context in line_contexts
-        ):
-            message = f"Cannot determine all shared-fixture consumers of {file_path}"
-            raise SelectionError(message) from error
-        if not candidates:
-            raise
+    validate_function_changes(file_path, patch, contexts, tests_only=False)
     if not candidates:
         message = f"No test contexts cover {file_path}"
         raise SelectionError(message)
