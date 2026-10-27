@@ -471,3 +471,72 @@ def test_test_module_string_edits_are_not_treated_as_comments(scope_project, gra
     )
     result = run_scope(project, revision, granularity=granularity)
     assert result.parseoutcomes().get("failed") == 1
+
+
+def test_cli_collection_errors_are_not_an_empty_selection(pytester):
+    pytester.makepyfile(test_broken="raise RuntimeError('cannot collect this module')\n")
+    with pytest.raises(ValueError, match="cannot collect this module"):
+        collect_current_tests(None)
+
+
+@pytest.mark.parametrize(
+    ("original", "updated", "message"),
+    [
+        (
+            "def price(): return 1\ndef price(): return 1\ndef other(): return 10\n",
+            "def price(): return 2\ndef price(): return 2\ndef other(): return 10\n",
+            "Ambiguous repeated scope",
+        ),
+        (
+            "def price(discount=False): return 1\ndef other(): return 10\n",
+            "def price(discount=True): return 1\ndef other(): return 10\n",
+            "structurally changed scope",
+        ),
+    ],
+    ids=["duplicate-definition", "single-line-signature"],
+)
+def test_ambiguous_source_scopes_require_original_selection(scope_project, original, updated, message):
+    project, _ = scope_project
+    path = project.path / "source.py"
+    path.write_text(original)
+    revision = baseline(project)
+    path.write_text(updated)
+    patch = prepare_diff(project, revision)
+    with pytest.raises(SelectionError, match=message):
+        run(patch, project.path / ".coverage", None, True, granularity=Granularity.test, base_ref=revision)
+
+
+def test_outer_function_change_excludes_nested_runtime_lines(scope_project):
+    project, _ = scope_project
+    path = project.path / "source.py"
+    path.write_text(
+        "def price():\n    def inner():\n        return 1\n    return inner()\n\ndef other():\n    return 10\n"
+    )
+    revision = baseline(project)
+    path.write_text(path.read_text().replace("return inner()", "return inner() + 1"))
+    run_scope(project, revision).assert_outcomes(failed=1, passed=1, deselected=2)
+
+
+@pytest.mark.parametrize("import_time", [False, True], ids=["uncovered", "import-time"])
+def test_scope_without_exclusive_runtime_coverage_requires_original_selection(
+    scope_project, coverage_file, import_time
+):
+    project, revision = scope_project
+    change_price(project)
+    patch = prepare_diff(project, revision)
+    contexts = {"test_helpers.py::test_other|run": {7}}
+    if import_time:
+        contexts[""] = {2, 3, 4}
+    database = coverage_file({"source.py": contexts})
+    with pytest.raises(SelectionError, match="Unknown or import-time coverage"):
+        run(patch, database, None, True, granularity=Granularity.test, base_ref=revision)
+
+
+def test_tests_outside_checkout_keep_the_original_selection(scope_project):
+    project, revision = scope_project
+    change_price(project)
+    external = project.path.parent / "test_external_checkout.py"
+    external.write_text("def test_external_checkout():\n    assert False\n")
+    result = run_scope(project, revision, str(external))
+    result.assert_outcomes(failed=1)
+    assert "tests outside the checkout; keeping the original selection" in result.stdout.str() + result.stderr.str()

@@ -83,7 +83,7 @@ def run(
             print(shlex.join(sorted(output)))
         elif fmt == Format.lines:
             print("\n".join(sorted(output)))
-        elif fmt == Format.json:
+        else:
             print(json.dumps({candidate.path.as_posix(): sorted(candidate.tests) for candidate in selected_tests}))
     return output
 

@@ -87,3 +87,25 @@ def test_filter_paths_no_prefix_multiple_paths():
 def test_generate_set():
     candidate = FileTestCandidate(path=Path("tests.py"), tests={"test1", "test2"})
     assert candidate.as_set() == {"tests.py::test1", "tests.py::test2"}
+
+
+@pytest.mark.parametrize("context", ["::test_case|run", "tests/test_case.py::|run"])
+def test_incomplete_pytest_identity_is_rejected(context):
+    with pytest.raises(ValueError, match="Invalid pytest context"):
+        _fix_test_name(context)
+
+
+def test_relativizing_to_a_file_keeps_its_basename(tmp_path):
+    path = tmp_path / "test_price.py"
+    assert filter_by_path([FileTestCandidate(path, {"test_price"})], [path], keep_prefix=False) == [
+        FileTestCandidate(Path("test_price.py"), {"test_price"})
+    ]
+
+
+def test_whole_module_selection_cannot_be_narrowed_by_later_candidates():
+    from skippy_cov.utils import merge_candidates
+
+    path = Path("test_price.py")
+    assert merge_candidates([FileTestCandidate(path, set()), FileTestCandidate(path, {"test_price"})]) == [
+        FileTestCandidate(path, set())
+    ]

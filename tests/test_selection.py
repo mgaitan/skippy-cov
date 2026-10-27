@@ -204,3 +204,21 @@ def test_structural_source_changes_without_consumers_require_original_selection(
 def test_non_python_and_shared_dependencies_require_original_selection(selection_case, filename):
     with pytest.raises(SelectionError, match="impact"):
         selection_case(filename=filename)
+
+
+def test_context_only_patch_without_consumers_requires_original_selection(tmp_path, monkeypatch, coverage_file):
+    monkeypatch.chdir(tmp_path)
+    Path("source.py").write_text("RATE = 1\n")
+    patch = DiffHandler("--- a/source.py\n+++ b/source.py\n@@ -1 +1 @@\n RATE = 1\n")
+    database = coverage_file({"other.py": {"test_other.py::test_other|run": {1}}})
+    with pytest.raises(SelectionError, match="No test contexts"):
+        select_tests_to_run(patch, CoverageMap(database))
+
+
+def test_missing_test_consumer_requires_original_selection(tmp_path, monkeypatch, coverage_file):
+    monkeypatch.chdir(tmp_path)
+    Path("source.py").write_text("def price():\n    return 2\n")
+    patch = DiffHandler("--- a/source.py\n+++ b/source.py\n@@ -2 +2 @@\n-    return 1\n+    return 2\n")
+    database = coverage_file({"source.py": {"test_deleted.py::test_price|run": {2}}})
+    with pytest.raises(SelectionError, match="Selected test module no longer exists"):
+        select_tests_to_run(patch, CoverageMap(database))

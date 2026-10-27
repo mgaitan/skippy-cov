@@ -97,12 +97,19 @@ Now, validate that all unit tests are passing:
 make test
 ```
 
+`make test` and `make test-cov` require 100% line and branch coverage of
+`skippy_cov`, including CLI and pytest integration subprocesses. The threshold
+is set by `fail_under = 100` in `pyproject.toml` and also applies in CI. Subprocess
+measurement uses coverage.py's native `patch = ["subprocess"]` support; it keeps
+the tool's coverage separate from the baseline databases created by the tests.
+There are no project-specific coverage exclusions.
+
 9. The supported Python versions are 3.12 through 3.15. CI tests all four versions.
    To reproduce the matrix locally:
 
 ```bash
 for version in 3.12 3.13 3.14 3.15; do
-    uv run --locked --isolated --no-default-groups --group test --python "$version" pytest
+    uv run --locked --isolated --no-default-groups --group test --python "$version" pytest --cov --cov-context=test --cov-report=term-missing
 done
 ```
 

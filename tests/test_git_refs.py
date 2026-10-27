@@ -87,3 +87,25 @@ def test_ref_cannot_be_interpreted_as_a_git_option(diverged_repository):
     with pytest.raises(DiffHandlerError, match="must not start"):
         get_diff_content("--output=unexpected-file")
     assert not Path("unexpected-file").exists()
+
+
+def test_default_branch_without_git_or_refs_uses_main(mocker):
+    mocker.patch("skippy_cov.__main__.subprocess.check_output", side_effect=FileNotFoundError)
+    assert get_default_branch() == "main"
+
+
+def test_baseline_resolution_reports_invalid_refs(diverged_repository):
+    from skippy_cov.__main__ import get_base_ref
+
+    with pytest.raises(DiffHandlerError, match="Cannot resolve baseline revision"):
+        get_base_ref("missing-ref")
+
+
+def test_baseline_ranges_use_merge_base_and_reject_a_different_new_revision(diverged_repository):
+    from skippy_cov.__main__ import get_base_ref
+
+    expected = subprocess.check_output(["git", "merge-base", "main", "HEAD"], text=True).strip()
+    assert get_base_ref("main...HEAD") == expected
+    assert get_base_ref("...HEAD") == subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    with pytest.raises(DiffHandlerError, match="new revision to be HEAD"):
+        get_base_ref("HEAD..main")

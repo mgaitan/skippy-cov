@@ -11,10 +11,9 @@ check: ## Check the lockfile, lint, formatting and types
 	uv run --locked ruff format --check
 	uv run --locked ty check skippy_cov
 
-test: ## Run the tests
-	uv run --locked pytest tests -vv
+test: test-cov ## Run the tests and require complete coverage
 
-test-cov: ## Run tests with coverage and pytest contexts
+test-cov: ## Require 100% line and branch coverage, including subprocesses
 	uv run --locked pytest tests --cov --cov-context=test --cov-report=term-missing
 
 release: ## Create a GitHub release for the version in pyproject.toml
