@@ -155,6 +155,39 @@ def test_structural_source_changes_select_all_file_consumers(selection_case):
     ) == [FileTestCandidate(Path("test_price.py"), set()), FileTestCandidate(Path("test_shared.py"), set())]
 
 
+@pytest.mark.parametrize("phase", ["setup", "teardown"])
+@pytest.mark.parametrize("source", ["def price():\n    return 2\n", "RATE = 2\ndef price():\n    return 1\n"])
+def test_source_with_shared_phase_contexts_requires_original_selection(selection_case, phase, source):
+    with pytest.raises(SelectionError, match="shared-fixture"):
+        selection_case(source, extra_context=f"test_shared.py::test_shared|{phase}", context_lines=3)
+
+
+@pytest.mark.parametrize("phase", ["setup", "teardown"])
+def test_run_only_body_change_does_not_require_file_fallback(tmp_path, monkeypatch, coverage_file, phase):
+    monkeypatch.chdir(tmp_path)
+    original = "def price():\n    return 1\n\ndef shared():\n    return 1\n"
+    source = original.replace("return 1", "return 2", 1)
+    Path("source.py").write_text(source)
+    for filename in ("test_price.py", "test_shared.py"):
+        Path(filename).write_text("def test_case():\n    assert True\n")
+    diff = "".join(
+        difflib.unified_diff(
+            original.splitlines(keepends=True),
+            source.splitlines(keepends=True),
+            fromfile="a/source.py",
+            tofile="b/source.py",
+        )
+    )
+    coverage_path = coverage_file(
+        {"source.py": {"test_price.py::test_case|run": {2}, f"test_shared.py::test_case|{phase}": {5}}}
+    )
+
+    assert select_tests_to_run(DiffHandler(diff), CoverageMap(coverage_path)) == [
+        FileTestCandidate(Path("test_price.py"), set()),
+        FileTestCandidate(Path("test_shared.py"), set()),
+    ]
+
+
 def test_structural_source_changes_without_consumers_require_original_selection(selection_case):
     with pytest.raises(SelectionError):
         selection_case(

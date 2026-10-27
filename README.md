@@ -129,12 +129,15 @@ methods, custom function names and parameterizations; skippy-cov does not rebuil
 their node IDs with a separate AST visitor.
 
 Changes to existing source function bodies with recorded execution under a
-test's `run` phase get precise selection. If a source diff also changes imports,
-declarations, setup/teardown behavior, or otherwise cannot be narrowed safely,
-skippy-cov selects every test module recorded as a consumer of that source file.
-If the baseline has no consumers for the file, callers must use the original
-pytest selection. This file-level fallback uses known coverage instead of
-immediately escalating to the entire suite.
+test's `run` phase select the consuming test modules. If a source diff also
+changes imports, declarations, or otherwise needs file-level selection,
+skippy-cov selects every test module recorded as a consumer of that source file,
+provided the file has no recorded setup/teardown execution. Shared fixtures may
+execute only for the first test that requests them, so those contexts cannot
+identify every test that reuses their results. A file-level fallback involving
+setup/teardown therefore requires the original pytest selection, as does a file
+with no recorded consumers. This does not prevent selection for validated
+function-body changes covered only during `run` in the same source file.
 
 Changes to test modules select the whole module when edits stay within test
 functions, including newly added tests and `pytest.mark.parametrize` cases.

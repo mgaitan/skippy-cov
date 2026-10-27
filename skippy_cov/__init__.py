@@ -158,7 +158,16 @@ def select_tests_to_run(diff_handler: DiffHandler, coverage_map: CoverageMap) ->
         else:
             try:
                 validate_function_changes(file_path, patch, contexts, tests_only=False)
-            except SelectionError:
+            except SelectionError as error:
+                # A cached fixture's context only names the test that created it,
+                # not every test that later reused its result.
+                if any(
+                    context.endswith(("|setup", "|teardown"))
+                    for line_contexts in contexts.values()
+                    for context in line_contexts
+                ):
+                    message = f"Cannot determine all shared-fixture consumers of {file_path}"
+                    raise SelectionError(message) from error
                 if not candidates:
                     raise
                 selected_modules.update(candidate.path for candidate in candidates)
