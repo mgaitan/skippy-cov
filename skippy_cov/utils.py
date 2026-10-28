@@ -10,6 +10,17 @@ import coverage
 from coverage.exceptions import CoverageException
 
 
+def checkout_root() -> Path:
+    """Use Git's checkout boundary, independently of pytest's configuration root."""
+    try:
+        root = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return Path.cwd().resolve()
+    return Path(root).resolve()
+
+
 class FilterCandidatesError(ValueError):
     def __init__(self, *, paths: list[Path]):
         self.message = f"Attempting to relativize based in multiple paths: {paths}"
@@ -132,8 +143,7 @@ class CoverageMap:
         if not filepath.is_file():
             message = f"Missing coverage file: {filepath}"
             raise CoverageMapError(message)
-        self.root = Path.cwd().resolve()
-        self._validate_working_directory()
+        self.root = checkout_root()
         self.source_root = source_root.resolve() if source_root else self.root
         self.db = coverage.CoverageData(str(filepath.resolve()))
         try:
@@ -152,17 +162,6 @@ class CoverageMap:
         self._contexts: dict[Path, dict[int, list[str]]] = {}
         for filename in self.db.measured_files():
             self.filenames[self._relative_path(filename)].append(filename)
-
-    def _validate_working_directory(self) -> None:
-        try:
-            checkout_root = subprocess.check_output(
-                ["git", "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL
-            ).strip()
-        except (OSError, subprocess.CalledProcessError):
-            return
-        if self.root != Path(checkout_root).resolve():
-            message = f"Run skippy-cov from the repository root: {checkout_root} (current directory: {self.root})"
-            raise CoverageMapError(message)
 
     def _relative_path(self, filename: str) -> Path:
         path = Path(filename)

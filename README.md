@@ -138,9 +138,22 @@ CLI or GitHub Action interfaces, selection scopes, or exit codes.
 
 ### Coverage baseline
 
-Run skippy-cov from the repository root. Invocation from a Git subdirectory is
-rejected with an explicit diagnostic. The pytest plugin warns and keeps the
-original test selection when baseline validation fails.
+Run skippy-cov from any directory inside a Git checkout. Diff paths, relative
+coverage records, recorded test contexts, and source inspection use the actual
+Git checkout root (not pytest's configuration root). Without Git, the current
+directory is used.
+
+User-supplied coverage-file paths (including the default `.coverage`), patch-file
+paths, `--source-root`, and explicit test scopes remain relative to the invocation
+directory. CLI output is also invocation-relative; `--strip-prefix` instead strips
+the requested `--relative-to` scope. Absolute coverage paths are mapped from
+`--source-root` (the original checkout root), or from the current checkout root
+when omitted. Unmappable records are rejected rather than guessed by suffix.
+
+Pytest stays in the invocation directory: configuration discovery, default
+collection, `-k`, `-m`, and exact node IDs retain their normal pytest semantics.
+Selection never expands the caller's scope. The pytest plugin warns and keeps
+the original test selection when baseline validation fails.
 
 The baseline must be a readable coverage database with pytest test contexts,
 generated using `--cov-context=test`. Missing, empty, corrupt or context-free

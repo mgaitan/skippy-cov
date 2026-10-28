@@ -10,7 +10,7 @@ from skippy_cov import SelectionError, select_tests_to_run
 from skippy_cov.__main__ import get_base_ref, get_diff_content, run
 from skippy_cov.diff_handler import DiffHandler, DiffHandlerError
 from skippy_cov.scopes import Granularity
-from skippy_cov.utils import CollectedTest, CoverageMap, CoverageMapError, select_collected_tests
+from skippy_cov.utils import CollectedTest, CoverageMap, CoverageMapError, checkout_root, select_collected_tests
 
 plan_key = pytest.StashKey[tuple[DiffHandler, CoverageMap]]()
 report_key = pytest.StashKey[dict]()
@@ -198,7 +198,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     plan = config.stash.get(plan_key, None)
     if plan is None:
         return
-    root = Path.cwd().resolve()
+    root = checkout_root()
     if any(not item.path.resolve().is_relative_to(root) for item in items):
         decision(
             config, "fallback", "outside_checkout", "Tests outside the checkout", selected=len(items), deselected=0

@@ -88,6 +88,10 @@ def run(
             FileTestCandidate(test.path, {test.name} if test.name else set())
             for test in select_collected_tests(discovered, selected_tests)
         ]
+    selected_tests = [
+        FileTestCandidate(Path(os.path.relpath(coverage_map.root / candidate.path)), candidate.tests)
+        for candidate in selected_tests
+    ]
     if relative_to:
         selected_tests = filter_by_path(selected_tests, relative_to, keep_prefix)
     selected_tests = merge_candidates(selected_tests)
@@ -140,7 +144,7 @@ def get_diff_content(diff_arg: str | None = None) -> str:
         diff_ref = f"{diff_ref}...HEAD"
     try:
         return subprocess.check_output(
-            ["git", "diff", "--no-ext-diff", "--no-color", "--no-renames", diff_ref, "--"],
+            ["git", "diff", "--no-ext-diff", "--no-color", "--no-renames", "--no-relative", diff_ref, "--"],
             stderr=subprocess.PIPE,
             text=True,
         )

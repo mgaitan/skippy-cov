@@ -7,6 +7,8 @@ from pathlib import Path
 from unidiff import PatchedFile, PatchSet
 from unidiff.errors import UnidiffParseError
 
+from skippy_cov.utils import checkout_root
+
 
 class DiffHandlerError(Exception):
     pass
@@ -15,6 +17,7 @@ class DiffHandlerError(Exception):
 class DiffHandler:
     def __init__(self, contents: str, *, base_ref: str | None = None):
         """Parse a unified diff and optionally retain its baseline revision."""
+        self.root = checkout_root()
         self.base_ref = base_ref
         self.patches = self.parse_diff(contents)
 

@@ -88,7 +88,7 @@ def validate_function_changes(
 def select_source_modules(file_path: Path, patch: PatchedFile, coverage_map: CoverageMap) -> list[FileTestCandidate]:
     contexts = coverage_map.contexts_by_lineno(file_path)
     candidates = coverage_map.get_tests(file_path)
-    validate_function_changes(file_path, patch, contexts, tests_only=False)
+    validate_function_changes(coverage_map.root / file_path, patch, contexts, tests_only=False)
     if not candidates:
         message = f"No test contexts cover {file_path}"
         raise SelectionError(message)
@@ -111,7 +111,7 @@ def select_tests_to_run(
         if (
             file_path.suffix != ".py"
             or file_path.name in {"conftest.py", "__init__.py"}
-            or not file_path.is_file()
+            or not (coverage_map.root / file_path).is_file()
             or (patch.is_added_file and not (granularity == Granularity.test and is_test_module))
             or patch.is_removed_file
             or patch.is_rename
@@ -121,7 +121,9 @@ def select_tests_to_run(
             raise SelectionError(message)
         if is_test_module:
             if not patch.is_added_file:
-                validate_function_changes(file_path, patch, coverage_map.contexts_by_lineno(file_path), tests_only=True)
+                validate_function_changes(
+                    coverage_map.root / file_path, patch, coverage_map.contexts_by_lineno(file_path), tests_only=True
+                )
             selected_tests.append(FileTestCandidate(file_path, set()))
             selected_tests.extend(
                 FileTestCandidate(candidate.path, set()) for candidate in coverage_map.get_tests(file_path)
@@ -131,7 +133,7 @@ def select_tests_to_run(
         else:
             selected_tests.extend(select_source_modules(file_path, patch, coverage_map))
     for test_path in {candidate.path for candidate in selected_tests}:
-        if not test_path.is_file():
+        if not (coverage_map.root / test_path).is_file():
             message = f"Selected test module no longer exists: {test_path}"
             raise SelectionError(message)
     return merge_candidates(selected_tests)

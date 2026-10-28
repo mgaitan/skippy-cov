@@ -104,13 +104,15 @@ def test_source_root_maps_absolute_test_contexts(coverage_file, tmp_path, monkey
     ]
 
 
-@pytest.mark.parametrize("absolute_paths", [False, True])
-def test_subdirectory_invocation_is_rejected_explicitly(coverage_file, tmp_path, monkeypatch, absolute_paths):
+@pytest.mark.parametrize("source", ["source.py", "/recorded/source.py"])
+def test_subdirectory_maps_checkout_paths(coverage_file, tmp_path, monkeypatch, source):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    source = tmp_path / "source.py" if absolute_paths else Path("source.py")
     baseline_path = coverage_file({source: {TEST_CONTEXT: {2}}})
     subdirectory = tmp_path / "src"
     subdirectory.mkdir()
     monkeypatch.chdir(subdirectory)
-    with pytest.raises(CoverageMapError, match="Run skippy-cov from the repository root"):
-        CoverageMap(baseline_path)
+    mapping = CoverageMap(baseline_path, source_root=Path("/recorded"))
+    assert mapping.root == tmp_path
+    assert mapping.get_tests(Path("source.py")) == [
+        FileTestCandidate(Path("tests/test_source.py"), {"test_source"}),
+    ]
