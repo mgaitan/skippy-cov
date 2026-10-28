@@ -82,6 +82,50 @@ You may pass any valid git diff refspec to `--diff`, including triple-dot syntax
 
 See `skippy-cov --help` for more information.
 
+### Pytest selection reports
+
+With `--skippy-cov`, the terminal summary reports the decision: `applied`,
+`fallback` (the original selection was retained), or `empty`. It includes a
+reason and test counts when available. Module mode narrows paths before
+collection, so the number of tests excluded is unknown; it does not collect the
+original suite just to count them. Test mode counts items after pytest's scope,
+`-k` and `-m` filters; deselected counts include only skippy-cov's removals.
+Counts describe selection, not test outcomes.
+
+Optionally write the same decision for automation:
+
+```bash
+pytest --skippy-cov --skippy-cov-report=selection.json
+```
+
+The UTF-8 JSON schema (version `1`) has these fixed fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema_version` | integer | Currently `1` |
+| `status` | string | `applied`, `fallback`, or `empty` |
+| `reason_code` | string | Stable code described below |
+| `reason` | string | Human-readable detail; not a machine interface |
+| `granularity` | string | `module` or `test` |
+| `selected` | integer or null | Retained collected items, or `0` for an early empty decision |
+| `deselected` | integer or null | Items removed by skippy-cov; unknown in module narrowing |
+| `baseline` | object | `coverage_file` (string), `source_root` and `base_ref` (string or null), as supplied |
+
+Reason codes are `coverage_selection` (applied), `no_affected_tests` (empty),
+`selection_error` (unsafe/unavailable inputs or impact), `outside_checkout`
+(test items outside the checkout), and `selection_incomplete` (interruption
+before a decision completed). Baseline fields are input metadata, **not verified
+coverage provenance**; no revision is inferred from the database. Unavailable
+counts are `null`, including before collection completes.
+
+Reports are written at session finish, including failing test runs, or before
+module mode's early empty-selection exit (status 5). The destination's parent
+must already exist; existing files are overwritten. Write failures emit a
+`PytestWarning` rather than replacing pytest's outcome (normal pytest warning
+filters still apply). Without `--skippy-cov`, the report option has no effect:
+no file or summary is emitted. These additions do not change the standalone
+CLI or GitHub Action interfaces, selection scopes, or exit codes.
+
 ### Coverage baseline
 
 Run skippy-cov from the repository root. Invocation from a Git subdirectory is

@@ -69,7 +69,15 @@ def test_fine_module_and_full_runs_keep_the_same_failure(scope_project):
     project, revision = scope_project
     change_price(project)
 
-    run_scope(project, revision).assert_outcomes(failed=1, passed=1, deselected=2)
+    result = run_scope(project, revision, "--skippy-cov-report=decision.json", ".")
+    result.assert_outcomes(failed=1, passed=1, deselected=2)
+    data = json.loads((project.path / "decision.json").read_text())
+    assert data["status"] == "applied"
+    assert data["reason_code"] == "coverage_selection"
+    assert data["selected"] == 2
+    assert data["deselected"] == 2
+    assert data["baseline"]["base_ref"] == revision
+    assert "selected=2; deselected=2" in result.stdout.str()
     run_scope(project, revision, granularity="module").assert_outcomes(failed=1, passed=2)
     project.runpytest_subprocess(".").assert_outcomes(failed=1, passed=3)
 
