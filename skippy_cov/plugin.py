@@ -92,7 +92,11 @@ def pytest_addoption(parser):
         "--skippy-cov-report", type=Path, help="Write the selection decision as JSON (requires --skippy-cov)"
     )
     group.addoption("--skippy-cov-coverage-file", type=Path, default=Path(".coverage"))
-    group.addoption("--skippy-cov-source-root", type=Path, help="Original checkout root for coverage paths")
+    group.addoption(
+        "--skippy-cov-source-root",
+        type=Path,
+        help="Recording directory within checkout, or original root for relocated absolute paths",
+    )
     group.addoption("--skippy-cov-granularity", choices=list(Granularity), default=Granularity.module)
     group.addoption("--skippy-cov-base-ref", help="Coverage revision when --skippy-cov-diff is a patch file")
     group.addoption("--skippy-cov-keep-prefix", dest="skippy_cov_keep_prefix", action="store_true", default=True)

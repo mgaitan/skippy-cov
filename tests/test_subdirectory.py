@@ -181,3 +181,116 @@ def test_plugin_unmappable_coverage_keeps_original_subdirectory_selection(checko
 
 def test_plugin_individual_keeps_exact_unaffected_nodeid(checkout):
     plugin_run(checkout, "--skippy-cov-granularity=test", "test_price.py::test_other").assert_outcomes(deselected=1)
+
+
+@pytest.fixture
+def relative_subdir_checkout(pytester, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    root = pytester.path
+    package = root / "packages" / "api"
+    package.mkdir(parents=True)
+    monkeypatch.setenv("COVERAGE_FILE", str(root / ".coverage"))
+    (package / "pytest.ini").write_text("[pytest]\npythonpath = .\n")
+    (package / ".coveragerc").write_text("[run]\nrelative_files = true\ncore = ctrace\n")
+    (package / "source.py").write_text("def price():\n    return 1\n")
+    (package / "test_source.py").write_text(
+        "from source import price\ndef test_price():\n    assert price() == 1\ndef test_other():\n    assert True\n"
+    )
+    # Colliding root names must never become the selected consumers of the package.
+    (root / "source.py").write_text("def price():\n    return 100\n")
+    (root / "test_source.py").write_text("def test_root():\n    assert True\n")
+    git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.email", "tests@example.com")
+    git(root, "config", "user.name", "Tests")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "baseline")
+    revision = git(root, "rev-parse", "HEAD")
+    monkeypatch.chdir(package)
+    pytester.runpytest_subprocess("--cov=source", "--cov-context=test", "--cov-report=").assert_outcomes(passed=2)
+    (package / "source.py").write_text("def price():\n    return 2\n")
+    git(root, "add", "packages/api/source.py")
+    git(root, "commit", "-qm", "change")
+    return pytester, package, revision
+
+
+def test_relative_subdir_cli_module_root_and_subdir_equivalence(relative_subdir_checkout, monkeypatch):
+    project, _, revision = relative_subdir_checkout
+    assert run(get_diff_content(revision), project.path / ".coverage", None, True, source_root=Path(".")) == {
+        "test_source.py"
+    }
+    monkeypatch.chdir(project.path)
+    assert run(get_diff_content(revision), Path(".coverage"), None, True, source_root=Path("packages/api")) == {
+        "packages/api/test_source.py"
+    }
+
+
+def test_relative_subdir_cli_individual_root_and_subdir_equivalence(relative_subdir_checkout, monkeypatch):
+    project, _, revision = relative_subdir_checkout
+    assert run(
+        get_diff_content(revision),
+        project.path / ".coverage",
+        None,
+        True,
+        source_root=Path("."),
+        granularity=Granularity.test,
+        base_ref=revision,
+        collect=True,
+    ) == {"test_source.py::test_price"}
+    monkeypatch.chdir(project.path)
+    assert run(
+        get_diff_content(revision),
+        Path(".coverage"),
+        [Path("packages/api")],
+        True,
+        source_root=Path("packages/api"),
+        granularity=Granularity.test,
+        base_ref=revision,
+        collect=True,
+    ) == {"packages/api/test_source.py::test_price"}
+
+
+def test_relative_subdir_cli_missing_origin_errors_instead_of_matching_collision(relative_subdir_checkout):
+    project, _, revision = relative_subdir_checkout
+    result = subprocess.run(
+        [sys.executable, "-m", "skippy_cov", f"--diff={revision}", f"--coverage-file={project.path / '.coverage'}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "specify --source-root" in result.stderr
+
+
+def test_relative_subdir_plugin_module_root_and_subdir_equivalence(relative_subdir_checkout, monkeypatch):
+    project, _, revision = relative_subdir_checkout
+    args = ["--skippy-cov", f"--skippy-cov-diff={revision}", f"--skippy-cov-coverage-file={project.path / '.coverage'}"]
+    project.runpytest_subprocess(*args, "--skippy-cov-source-root=.").assert_outcomes(failed=1, passed=1)
+    monkeypatch.chdir(project.path)
+    project.runpytest_subprocess(*args, "--skippy-cov-source-root=packages/api", "packages/api").assert_outcomes(
+        failed=1, passed=1
+    )
+
+
+def test_relative_subdir_plugin_individual_root_and_subdir_equivalence(relative_subdir_checkout, monkeypatch):
+    project, _, revision = relative_subdir_checkout
+    args = [
+        "--skippy-cov",
+        "--skippy-cov-granularity=test",
+        f"--skippy-cov-diff={revision}",
+        f"--skippy-cov-coverage-file={project.path / '.coverage'}",
+    ]
+    project.runpytest_subprocess(*args, "--skippy-cov-source-root=.").assert_outcomes(failed=1, deselected=1)
+    monkeypatch.chdir(project.path)
+    project.runpytest_subprocess(*args, "--skippy-cov-source-root=packages/api", "packages/api").assert_outcomes(
+        failed=1, deselected=1
+    )
+
+
+def test_relative_subdir_plugin_missing_origin_falls_back(relative_subdir_checkout):
+    project, _, revision = relative_subdir_checkout
+    result = project.runpytest_subprocess(
+        "--skippy-cov", f"--skippy-cov-diff={revision}", f"--skippy-cov-coverage-file={project.path / '.coverage'}"
+    )
+    result.assert_outcomes(failed=1, passed=1)
+    assert "specify --source-root" in result.stderr.str()
+    assert "running the original test selection" in result.stderr.str()
