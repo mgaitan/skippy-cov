@@ -10,7 +10,7 @@ from skippy_cov import SelectionError, select_tests_to_run
 from skippy_cov.__main__ import get_base_ref, get_diff_content, run
 from skippy_cov.diff_handler import DiffHandler, DiffHandlerError
 from skippy_cov.scopes import Granularity
-from skippy_cov.utils import CollectedTest, CoverageMap, CoverageMapError, select_collected_tests
+from skippy_cov.utils import CollectedTest, CoverageMap, CoverageMapError, checkout_root, select_collected_tests
 
 plan_key = pytest.StashKey[tuple[DiffHandler, CoverageMap]]()
 report_key = pytest.StashKey[dict]()
@@ -92,7 +92,11 @@ def pytest_addoption(parser):
         "--skippy-cov-report", type=Path, help="Write the selection decision as JSON (requires --skippy-cov)"
     )
     group.addoption("--skippy-cov-coverage-file", type=Path, default=Path(".coverage"))
-    group.addoption("--skippy-cov-source-root", type=Path, help="Original checkout root for coverage paths")
+    group.addoption(
+        "--skippy-cov-source-root",
+        type=Path,
+        help="Recording directory within checkout, or original root for relocated absolute paths",
+    )
     group.addoption("--skippy-cov-granularity", choices=list(Granularity), default=Granularity.module)
     group.addoption("--skippy-cov-base-ref", help="Coverage revision when --skippy-cov-diff is a patch file")
     group.addoption("--skippy-cov-keep-prefix", dest="skippy_cov_keep_prefix", action="store_true", default=True)
@@ -198,7 +202,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     plan = config.stash.get(plan_key, None)
     if plan is None:
         return
-    root = Path.cwd().resolve()
+    root = checkout_root()
     if any(not item.path.resolve().is_relative_to(root) for item in items):
         decision(
             config, "fallback", "outside_checkout", "Tests outside the checkout", selected=len(items), deselected=0

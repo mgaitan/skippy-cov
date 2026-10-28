@@ -10,6 +10,17 @@ import coverage
 from coverage.exceptions import CoverageException
 
 
+def checkout_root() -> Path:
+    """Use Git's checkout boundary, independently of pytest's configuration root."""
+    try:
+        root = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return Path.cwd().resolve()
+    return Path(root).resolve()
+
+
 class FilterCandidatesError(ValueError):
     def __init__(self, *, paths: list[Path]):
         self.message = f"Attempting to relativize based in multiple paths: {paths}"
@@ -132,9 +143,11 @@ class CoverageMap:
         if not filepath.is_file():
             message = f"Missing coverage file: {filepath}"
             raise CoverageMapError(message)
-        self.root = Path.cwd().resolve()
-        self._validate_working_directory()
+        self.root = checkout_root()
         self.source_root = source_root.resolve() if source_root else self.root
+        self.recording_prefix = (
+            self.source_root.relative_to(self.root) if self.source_root.is_relative_to(self.root) else Path()
+        )
         self.db = coverage.CoverageData(str(filepath.resolve()))
         try:
             self.db.read()
@@ -153,23 +166,12 @@ class CoverageMap:
         for filename in self.db.measured_files():
             self.filenames[self._relative_path(filename)].append(filename)
 
-    def _validate_working_directory(self) -> None:
-        try:
-            checkout_root = subprocess.check_output(
-                ["git", "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL
-            ).strip()
-        except (OSError, subprocess.CalledProcessError):
-            return
-        if self.root != Path(checkout_root).resolve():
-            message = f"Run skippy-cov from the repository root: {checkout_root} (current directory: {self.root})"
-            raise CoverageMapError(message)
-
     def _relative_path(self, filename: str) -> Path:
         path = Path(filename)
         if not path.is_absolute():
-            return path
+            return self.recording_prefix / path
         try:
-            return path.relative_to(self.source_root)
+            return self.recording_prefix / path.relative_to(self.source_root)
         except ValueError as error:
             message = f"Cannot map {filename} to the recorded source root {self.source_root}"
             raise CoverageMapError(message) from error
@@ -180,6 +182,17 @@ class CoverageMap:
             return self._contexts[relative_path]
         filenames = self.filenames.get(relative_path)
         if filenames is None:
+            if any(
+                not Path(filename).is_absolute()
+                and relative_path.parts[-len(Path(filename).parts) :] == Path(filename).parts
+                for filename in self.db.measured_files()
+            ):
+                message = (
+                    f"Cannot determine the recording root for relative coverage of {relative_path}; "
+                    "specify --source-root (pytest: --skippy-cov-source-root) as the coverage recording "
+                    "directory within this checkout. Relative coverage has no origin metadata."
+                )
+                raise CoverageMapError(message)
             return {}
         contexts: dict[int, list[str]] = defaultdict(list)
         for filename in filenames:

@@ -91,7 +91,7 @@ def code_lines(source: bytes) -> set[int]:
 
 def changed_scopes(diff: DiffHandler, path: Path) -> tuple[dict[tuple[str, ...], Scope], set[tuple[str, ...]]]:
     """Use old coordinates for removals and new coordinates only to match additions."""
-    old_source, new_source = diff.base_source(path), path.read_bytes()
+    old_source, new_source = diff.base_source(path), (diff.root / path).read_bytes()
     old_scopes, new_scopes = source_scopes(old_source), source_scopes(new_source)
     old_code, new_code = code_lines(old_source), code_lines(new_source)
     affected: set[tuple[str, ...]] = set()

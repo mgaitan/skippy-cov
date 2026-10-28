@@ -138,9 +138,41 @@ CLI or GitHub Action interfaces, selection scopes, or exit codes.
 
 ### Coverage baseline
 
-Run skippy-cov from the repository root. Invocation from a Git subdirectory is
-rejected with an explicit diagnostic. The pytest plugin warns and keeps the
-original test selection when baseline validation fails.
+Run skippy-cov from any directory inside a Git checkout. Diff paths and source
+inspection use the actual Git checkout root (not pytest's configuration root).
+Without Git, the current directory is used.
+
+User-supplied coverage-file paths (including the default `.coverage`), patch-file
+paths, `--source-root`, and explicit test scopes remain relative to the invocation
+directory. CLI output is also invocation-relative; `--strip-prefix` instead strips
+the requested `--relative-to` scope.
+
+By default, relative coverage filenames and pytest context paths are interpreted
+relative to the checkout root, regardless of the invocation directory. For a
+`relative_files = true` baseline recorded from a checkout subdirectory, explicitly
+set `--source-root packages/api` (pytest: `--skippy-cov-source-root packages/api`)
+when invoking from the checkout root, or `--source-root .` when invoking from
+`packages/api`. This rebases both source records and test contexts into that
+checkout subdirectory. The recording setup must use the same base for relative
+source and context paths; differing bases are unsupported.
+
+For absolute relocated artifacts, a source root outside the current checkout is
+the original checkout root, whose prefix is replaced by the current checkout
+root. Absolute records under an in-checkout source root retain that subdirectory
+prefix too. Unmappable absolute records are rejected.
+
+Relative coverage contains no recording-directory metadata. Neither the current
+invocation directory nor basename matches establish its origin. A missing exact
+match with a relative suffix in the baseline raises an actionable recording-root
+error (the plugin falls back to the original selection), never a guessed match.
+This cannot detect every mismatch: colliding paths may be valid under either
+origin. You must provide the recording directory explicitly for subdirectory
+baselines, even if a same-named file exists at the checkout root.
+
+Pytest stays in the invocation directory: configuration discovery, default
+collection, `-k`, `-m`, and exact node IDs retain their normal pytest semantics.
+Selection never expands the caller's scope. The pytest plugin warns and keeps
+the original test selection when baseline validation fails.
 
 The baseline must be a readable coverage database with pytest test contexts,
 generated using `--cov-context=test`. Missing, empty, corrupt or context-free

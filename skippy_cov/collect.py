@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from skippy_cov.plugin import describe_item
+from skippy_cov.utils import checkout_root
 
 
 class Collector:
@@ -16,7 +17,7 @@ class Collector:
         self.output = output
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
-        root = Path.cwd().resolve()
+        root = checkout_root()
         tests = []
         for item in session.items:
             test = describe_item(item, root)

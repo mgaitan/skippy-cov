@@ -88,6 +88,10 @@ def run(
             FileTestCandidate(test.path, {test.name} if test.name else set())
             for test in select_collected_tests(discovered, selected_tests)
         ]
+    selected_tests = [
+        FileTestCandidate(Path(os.path.relpath(coverage_map.root / candidate.path)), candidate.tests)
+        for candidate in selected_tests
+    ]
     if relative_to:
         selected_tests = filter_by_path(selected_tests, relative_to, keep_prefix)
     selected_tests = merge_candidates(selected_tests)
@@ -140,7 +144,7 @@ def get_diff_content(diff_arg: str | None = None) -> str:
         diff_ref = f"{diff_ref}...HEAD"
     try:
         return subprocess.check_output(
-            ["git", "diff", "--no-ext-diff", "--no-color", "--no-renames", diff_ref, "--"],
+            ["git", "diff", "--no-ext-diff", "--no-color", "--no-renames", "--no-relative", diff_ref, "--"],
             stderr=subprocess.PIPE,
             text=True,
         )
@@ -188,7 +192,11 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Select pytest modules based on diff and historical coverage.")
     parser.add_argument("--diff", help="Patch file, git ref (compared with ...HEAD), or explicit range.")
     parser.add_argument("--coverage-file", type=Path, default=Path(".coverage"), help="Coverage SQLite database.")
-    parser.add_argument("--source-root", type=Path, help="Original checkout root for absolute coverage paths.")
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        help="Recording directory within checkout for relative paths, or original checkout root for relocated absolute paths.",
+    )
     parser.add_argument("--granularity", type=Granularity, choices=list(Granularity), default=Granularity.module)
     parser.add_argument("--base-ref", help="Coverage revision; required for individual selection with a patch file.")
     parser.add_argument("--relative-to", type=Path, nargs="+", help="Limit selection to these files or directories.")
