@@ -85,7 +85,8 @@ See `skippy-cov --help` for more information.
 ### Pytest selection reports
 
 With `--skippy-cov`, the terminal summary reports the decision: `applied`,
-`fallback` (the original selection was retained), or `empty`. It includes a
+`fallback` (the original selection was retained), `empty`, or `incomplete`
+(distributed decisions could not be established reliably). It includes a
 reason and test counts when available. Module mode narrows paths before
 collection, so the number of tests excluded is unknown; it does not collect the
 original suite just to count them. Test mode counts items after pytest's scope,
@@ -117,6 +118,15 @@ Reason codes are `coverage_selection` (applied), `no_affected_tests` (empty),
 before a decision completed). Baseline fields are input metadata, **not verified
 coverage provenance**; no revision is inferred from the database. Unavailable
 counts are `null`, including before collection completes.
+
+With pytest-xdist, only the controller writes JSON and the terminal summary.
+Workers transfer their collection decisions to the controller. Matching worker
+reports are counted once, not summed: collection is replicated on every worker.
+Missing or disagreeing reports, or worker crashes, produce status `incomplete`
+with reason code `worker_reports_incomplete` and `null` counts. This is a reporting
+uncertainty, **not** a claim that the original suite ran or a change to selection
+or xdist's handling of failures. Module mode's early empty exit is reported by
+the controller before workers start.
 
 Reports are written at session finish, including failing test runs, or before
 module mode's early empty-selection exit (status 5). The destination's parent

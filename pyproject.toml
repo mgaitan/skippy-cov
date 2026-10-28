@@ -33,7 +33,12 @@ Issues = "https://github.com/mgaitan/skippy-cov/issues"
 Changelog = "https://github.com/mgaitan/skippy-cov/releases"
 
 [dependency-groups]
-test = ["pytest>=9.1.1", "pytest-mock>=3.15.1", "pytest-cov>=7.1.0"]
+test = [
+    "pytest>=9.1.1",
+    "pytest-mock>=3.15.1",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
+]
 lint = ["ruff>=0.17.1"]
 qa = [{ include-group = "lint" }, "ty>=0.0.90", "types-unidiff"]
 dev = [{ include-group = "test" }, { include-group = "qa" }]

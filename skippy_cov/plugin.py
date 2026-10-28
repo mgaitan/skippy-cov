@@ -14,6 +14,7 @@ from skippy_cov.utils import CollectedTest, CoverageMap, CoverageMapError, selec
 
 plan_key = pytest.StashKey[tuple[DiffHandler, CoverageMap]]()
 report_key = pytest.StashKey[dict]()
+worker_reports_key = pytest.StashKey[list[dict | None]]()
 
 
 def decision(config, status, reason_code, reason, *, selected=None, deselected=None):
@@ -35,6 +36,8 @@ def summary(report):
 
 
 def write_report(config):
+    if hasattr(config, "workerinput"):
+        return
     path = config.getoption("skippy_cov_report")
     if path is None:
         return
@@ -45,13 +48,39 @@ def write_report(config):
 
 
 def pytest_sessionfinish(session):
-    if report_key in session.config.stash:
-        write_report(session.config)
+    config = session.config
+    if report_key not in config.stash:
+        return
+    if hasattr(config, "workerinput"):
+        config.workeroutput["skippy_cov_report"] = config.stash[report_key]
+        return
+    reports = config.stash.get(worker_reports_key, [])
+    if reports:
+        first = reports[0]
+        if first is not None and all(report == first for report in reports):
+            config.stash[report_key] = first
+        else:
+            decision(
+                config,
+                "incomplete",
+                "worker_reports_incomplete",
+                "Worker selection reports are missing, disagree, or a worker crashed; selection counts are unknown",
+            )
+    write_report(config)
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error):
+    config = node.config
+    if report_key not in config.stash:
+        return
+    reports = config.stash.setdefault(worker_reports_key, [])
+    reports.append(None if error else node.workeroutput.get("skippy_cov_report"))
 
 
 def pytest_terminal_summary(terminalreporter):
     report = terminalreporter.config.stash.get(report_key, None)
-    if report is not None:
+    if report is not None and not hasattr(terminalreporter.config, "workerinput"):
         terminalreporter.write_sep("-", summary(report))
 
 
@@ -143,7 +172,8 @@ def pytest_configure(config):
     if not targets:
         decision(config, "empty", "no_affected_tests", "No tests affected within the requested selection", selected=0)
         write_report(config)
-        print(summary(config.stash[report_key]), file=sys.stderr)
+        if not hasattr(config, "workerinput"):
+            print(summary(config.stash[report_key]), file=sys.stderr)
         pytest.exit("skippy-cov: no tests affected within the requested selection", returncode=5)
     decision(config, "applied", "coverage_selection", "Narrowed collection to affected modules")
     config.args = targets
