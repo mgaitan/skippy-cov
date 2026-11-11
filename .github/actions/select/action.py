@@ -7,8 +7,11 @@ import os
 import re
 import subprocess
 import sys
+import urllib.request
 import uuid
 from pathlib import Path
+from urllib.error import URLError
+from urllib.parse import urlencode
 
 
 def output(**values):
@@ -16,6 +19,17 @@ def output(**values):
         for key, value in values.items():
             delimiter = uuid.uuid4().hex
             stream.write(f"{key}<<{delimiter}\n{value}\n{delimiter}\n")
+
+
+def github_api(endpoint, **parameters):
+    api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+    token = os.environ.get("GH_TOKEN") or os.environ["GITHUB_TOKEN"]
+    request = urllib.request.Request(  # noqa: S310 - GitHub supplies the API URL.
+        f"{api_url.rstrip('/')}/{endpoint}?{urlencode(parameters)}",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 - GitHub supplies the API URL.
+        return json.load(response)
 
 
 def prepare_history(ref):
@@ -48,27 +62,20 @@ def baseline():
         raise ValueError("A valid base-ref, base-branch, workflow and cache-prefix are required")
     ref = prepare_history(ref)
     repository = os.environ["GITHUB_REPOSITORY"]
-    result = subprocess.run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            "--slurp",
-            "-X",
-            "GET",
+    caches = []
+    page = 1
+    while True:
+        batch = github_api(
             f"repos/{repository}/actions/caches",
-            "-f",
-            f"ref=refs/heads/{branch}",
-            "-f",
-            f"key={prefix}-",
-            "-f",
-            "per_page=100",
-        ],
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    caches = [cache for page in json.loads(result.stdout) for cache in page["actions_caches"]]
+            ref=f"refs/heads/{branch}",
+            key=f"{prefix}-",
+            per_page=100,
+            page=page,
+        )["actions_caches"]
+        caches.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
     for cache in sorted(caches, key=lambda item: item["created_at"], reverse=True):
         match = re.fullmatch(rf"{re.escape(prefix)}-(\d+)-([0-9a-f]{{40}})", cache["key"])
         if not match or cache["ref"] != f"refs/heads/{branch}":
@@ -79,12 +86,10 @@ def baseline():
             for target in ("HEAD", ref)
         ):
             continue
-        run = subprocess.run(
-            ["gh", "api", f"repos/{repository}/actions/runs/{run_id}"], text=True, capture_output=True, check=False
-        )
-        if run.returncode:
+        try:
+            metadata = github_api(f"repos/{repository}/actions/runs/{run_id}")
+        except URLError:
             continue
-        metadata = json.loads(run.stdout)
         if (
             metadata["head_sha"] == revision
             and metadata["head_branch"] == branch
