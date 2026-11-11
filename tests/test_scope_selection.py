@@ -1,6 +1,8 @@
 import json
+import runpy
 import subprocess
 import sys
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -553,8 +555,7 @@ def test_cli_explicit_import_mode_handles_duplicate_module_names(pytester):
     assert {test.path.as_posix() for test in tests} == {"one/test_same.py", "two/test_same.py"}
 
 
-def test_github_action_validates_baseline_and_selects(scope_project, monkeypatch):
-    import os
+def test_github_action_validates_baseline_and_selects(scope_project, monkeypatch, mocker):
     import shutil
 
     project, revision = scope_project
@@ -566,23 +567,30 @@ def test_github_action_validates_baseline_and_selects(scope_project, monkeypatch
     directory.mkdir()
     shutil.copy(project.path / ".coverage", directory / ".coverage")
     (directory / "sha.txt").write_text(revision)
-    mock_gh = project.path / "gh"
-    mock_gh.write_text(
-        f"#!{sys.executable}\nimport json, sys\n"
-        f"revision = {revision!r}\n"
-        "if any('/actions/caches' in arg for arg in sys.argv):\n"
-        "    print(json.dumps([{'actions_caches': ["
-        "{'key': f'cov-2-{revision}', 'ref': 'refs/heads/main', 'created_at': '2026-02'}, "
-        "{'key': f'cov-1-{revision}', 'ref': 'refs/heads/main', 'created_at': '2026-01'}]}]))\n"
-        "else:\n"
-        "    print(json.dumps({'head_sha': revision, 'head_branch': 'main', 'event': 'push', "
-        "'conclusion': 'failure' if sys.argv[-1].endswith('/2') else 'success', "
-        "'path': '.github/workflows/full.yml'}))\n"
-    )
-    mock_gh.chmod(0o755)
+
+    def github_response(request, **kwargs):
+        if "/actions/caches?" in request.full_url:
+            payload = {
+                "actions_caches": [
+                    {"key": f"cov-2-{revision}", "ref": "refs/heads/main", "created_at": "2026-02"},
+                    {"key": f"cov-1-{revision}", "ref": "refs/heads/main", "created_at": "2026-01"},
+                ]
+            }
+        else:
+            payload = {
+                "head_sha": revision,
+                "head_branch": "main",
+                "event": "push",
+                "conclusion": "failure" if request.full_url.endswith("/2?") else "success",
+                "path": ".github/workflows/full.yml",
+            }
+        return BytesIO(json.dumps(payload).encode())
+
+    mocker.patch("urllib.request.urlopen", side_effect=github_response)
+    monkeypatch.chdir(project.path)
     output = project.path / "output"
-    env = os.environ | {
-        "PATH": f"{project.path}{os.pathsep}{os.environ['PATH']}",
+    env = {
+        "GH_TOKEN": "test-token",
         "GITHUB_OUTPUT": str(output),
         "GITHUB_REPOSITORY": "example/project",
         "BASE_REF": revision,
@@ -601,7 +609,11 @@ def test_github_action_validates_baseline_and_selects(scope_project, monkeypatch
 
     def execute(command):
         output.write_text("")
-        subprocess.run([sys.executable, str(action), command], cwd=project.path, env=env, check=True)
+        with monkeypatch.context() as patch:
+            for key, value in env.items():
+                patch.setenv(key, value)
+            patch.setattr(sys, "argv", [str(action), command])
+            runpy.run_path(str(action), run_name="__main__")
         lines = output.read_text().splitlines()
         return {lines[i].split("<<", 1)[0]: lines[i + 1] for i in range(0, len(lines), 3)}
 
