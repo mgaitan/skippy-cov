@@ -4,7 +4,11 @@ import json
 import runpy
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -53,6 +57,7 @@ def bridge(monkeypatch):
         "WORKFLOW": ".github/workflows/full.yml",
         "CACHE_PREFIX": "baseline-v1",
         "GITHUB_REPOSITORY": "owner/project",
+        "GH_TOKEN": "test-token",
     }.items():
         monkeypatch.setenv(name, value)
     return namespace, values
@@ -73,12 +78,18 @@ def github(monkeypatch, revision, workflow=".github/workflows/full.yml@refs/head
 
     def run(command, **kwargs):
         commands.append(command)
-        if command[0] != "gh":
-            return real_run(command, **kwargs)
-        data = [{"actions_caches": [cache]}] if command[-1] == "per_page=100" else metadata
-        return subprocess.CompletedProcess(command, 0, json.dumps(data), "")
+        assert command[0] != "gh", "The action must not depend on GitHub CLI"
+        return real_run(command, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", run)
+
+    def urlopen(request, **kwargs):
+        response = MagicMock()
+        payload = {"actions_caches": [cache]} if urlparse(request.full_url).path.endswith("/caches") else metadata
+        response.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+        return response
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
     return commands
 
 
@@ -198,3 +209,61 @@ def test_entrypoint_falls_back_safely(history, bridge, monkeypatch, tmp_path, fa
     assert result[0].startswith("selected<<")
     assert result[1] == "false"
     assert lines[4] in result
+
+
+@pytest.mark.parametrize("token_variable", ["GH_TOKEN", "GITHUB_TOKEN"])
+def test_api_authentication_and_enterprise_url(bridge, monkeypatch, token_variable):
+    namespace, _ = bridge
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setenv(token_variable, "test-token")
+    monkeypatch.setenv("GITHUB_API_URL", "https://github.example/api/v3/")
+    with patch("urllib.request.urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value.read.return_value = b'{"ok":true}'
+        assert namespace["github_api"]("repos/owner/project/actions/caches", ref="refs/heads/feature/a") == {"ok": True}
+    request = urlopen.call_args.args[0]
+    assert request.get_header("Authorization") == "Bearer test-token"
+    assert request.full_url.startswith("https://github.example/api/v3/repos/owner/project/actions/caches?")
+    assert parse_qs(urlparse(request.full_url).query) == {"ref": ["refs/heads/feature/a"]}
+    assert urlopen.call_args.kwargs["timeout"] == 30
+
+
+def test_cache_pagination_reaches_eligible_second_page(history, bridge, monkeypatch):
+    source, _, revisions, _, base = history
+    namespace, values = bridge
+    monkeypatch.chdir(source)
+    monkeypatch.setenv("BASE_REF", base)
+    github(monkeypatch, revisions[4])
+    real_urlopen = urllib.request.urlopen
+    pages = []
+
+    def urlopen(request, **kwargs):
+        query = parse_qs(urlparse(request.full_url).query)
+        if urlparse(request.full_url).path.endswith("/caches"):
+            pages.append(query["page"])
+            if query["page"] == ["1"]:
+                response = MagicMock()
+                response.__enter__.return_value.read.return_value = json.dumps(
+                    {"actions_caches": [{"key": "unrelated", "created_at": "2026-10-28"}] * 100}
+                ).encode()
+                return response
+        return real_urlopen(request, **kwargs)
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    namespace["baseline"]()
+    assert pages == [["1"], ["2"]]
+    assert values["baseline"] == revisions[4]
+
+
+def test_api_failure_keeps_safe_fallback(history, bridge, monkeypatch, tmp_path):
+    source, _, _, _, base = history
+    monkeypatch.chdir(source)
+    monkeypatch.setenv("BASE_REF", base)
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(sys, "argv", [str(ACTION), "baseline"])
+    with patch("urllib.request.urlopen", side_effect=HTTPError("https://api.github.com", 403, "Forbidden", {}, None)):
+        runpy.run_path(str(ACTION), run_name="__main__")
+    result = output.read_text().splitlines()
+    assert result[0].startswith("baseline<<")
+    assert result[1] == ""
+    assert "HTTP Error 403" in result[4]

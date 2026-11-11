@@ -336,6 +336,11 @@ then returns `baseline`, `selected`, `targets` (JSON) and `reason`. A missing,
 invalid or unsafe baseline returns `selected: false`; the caller chooses its
 full workflow. An empty JSON object is a successful empty selection.
 
+GitHub metadata is read directly through the REST API using Python's standard
+library; GitHub CLI (`gh`) is not required. The action uses the job token and
+`GITHUB_API_URL` (including GitHub Enterprise), paginates cache results, and
+falls back safely when the API cannot provide a valid baseline.
+
 After **all** full-suite jobs have succeeded, combine their coverage databases
 and save the baseline directory in the full workflow:
 
